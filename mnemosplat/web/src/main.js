@@ -35,6 +35,8 @@ const state = {
   booted: false,
   xr: false,
   seenFrames: new Set(),
+  uploadFile: null,
+  uploading: false,
 };
 
 let stage = null;
@@ -55,6 +57,17 @@ const dom = {
   aboutBtn: $('#about-btn'),
   modal: $('#modal'),
   modalProv: $('#modal-provenance'),
+  eegBtn: $('#eeg-upload-btn'),
+  eegModal: $('#eeg-modal'),
+  eegDrop: $('#eeg-drop'),
+  eegFile: $('#eeg-file'),
+  eegDropTitle: $('#eeg-drop-title'),
+  eegDropHint: $('#eeg-drop-hint'),
+  eegSfreq: $('#eeg-sfreq'),
+  eegSubmit: $('#eeg-submit'),
+  eegStatus: $('#eeg-status'),
+  eegProgress: $('#eeg-progress'),
+  eegProgressFill: $('#eeg-progress-fill'),
   lightbox: $('#lightbox'),
   lightboxImg: $('#lightbox-img'),
   lightboxCap: $('#lightbox-cap'),
@@ -253,6 +266,12 @@ function renderModeToggle() {
     button.addEventListener('click', () => selectCondition(scenario.key));
     dom.mode.append(button);
   }
+  if (dom.mode.scrollWidth > dom.mode.clientWidth) {
+    dom.mode.querySelector('.mode-btn.is-active')?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  }
 }
 
 function renderSpark(frames) {
@@ -356,6 +375,9 @@ function provenanceChips(manifest) {
     text: eeg.startsWith('synthetic') ? 'synthetic EEG' : 'recorded EEG',
     tone: eeg.startsWith('synthetic') ? 'is-warn' : 'is-real',
   });
+  if (up.eeg_file) {
+    chips.push({ text: String(up.eeg_file), tone: '' });
+  }
   const keyframe = String(up.keyframe || '');
   chips.push({
     text: keyframe.includes('muse') ? 'Muse Image keyframe' : 'procedural keyframe',
@@ -611,6 +633,235 @@ function closeLightbox() {
   dom.lightboxImg.removeAttribute('src');
 }
 
+/* --------------------------------------------------------------- EEG upload */
+const EEG_MAX_BYTES = 12 * 1024 * 1024;
+const EEG_EXTENSIONS = new Set(['csv', 'tsv', 'txt', 'npy']);
+
+function formatBytes(bytes) {
+  const n = Number(bytes) || 0;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+function setEEGStatus(message, tone = '') {
+  dom.eegStatus.textContent = message;
+  dom.eegStatus.className = `eeg-status${tone ? ` ${tone}` : ''}`;
+}
+
+function setEEGProgress(percent) {
+  dom.eegProgressFill.style.width = `${clamp(Number(percent) || 0, 0, 100).toFixed(1)}%`;
+}
+
+function clearEEGSelection() {
+  state.uploadFile = null;
+  dom.eegFile.value = '';
+  dom.eegDrop.classList.remove('is-set', 'is-over');
+  dom.eegDropTitle.textContent = 'Drop an EEG file here';
+  dom.eegDropHint.textContent = 'CSV with channel columns, or NPY · max 12 MB';
+  dom.eegSubmit.disabled = true;
+}
+
+function resetEEGForm() {
+  clearEEGSelection();
+  dom.eegSfreq.value = '250';
+  dom.eegSubmit.textContent = 'Condition volume';
+  setEEGProgress(0);
+  setEEGStatus('Choose a recording to begin.');
+}
+
+function openEEGModal() {
+  closeModal();
+  dom.eegModal.hidden = false;
+  setTimeout(() => dom.eegDrop.focus(), 0);
+}
+
+function closeEEGModal() {
+  dom.eegModal.hidden = true;
+  if (!state.uploading) resetEEGForm();
+}
+
+function setEEGFile(file) {
+  if (!file) return;
+  const extension = String(file.name || '').split('.').pop().toLowerCase();
+  if (!EEG_EXTENSIONS.has(extension)) {
+    clearEEGSelection();
+    setEEGStatus(
+      'That file type is not supported yet. Upload a CSV, TSV, TXT or NPY file.',
+      'is-error',
+    );
+    return;
+  }
+  if (!file.size) {
+    clearEEGSelection();
+    setEEGStatus('That file is empty.', 'is-error');
+    return;
+  }
+  if (file.size > EEG_MAX_BYTES) {
+    clearEEGSelection();
+    setEEGStatus(
+      `That file is ${formatBytes(file.size)}; the limit is ${formatBytes(EEG_MAX_BYTES)}.`,
+      'is-error',
+    );
+    return;
+  }
+
+  state.uploadFile = file;
+  dom.eegDrop.classList.add('is-set');
+  dom.eegDropTitle.textContent = file.name;
+  dom.eegDropHint.textContent = `${formatBytes(file.size)} · ${extension.toUpperCase()} · click to replace`;
+  dom.eegSubmit.disabled = false;
+  setEEGProgress(0);
+  setEEGStatus('Ready. The baked keyframe and depth map will be reused.', 'is-ok');
+}
+
+function uploadEEGFile(file, sfreq, onProgress) {
+  return new Promise((resolve, reject) => {
+    const xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/eeg');
+    xhr.responseType = 'text';
+    xhr.timeout = 120_000;
+
+    xhr.upload.addEventListener('progress', (event) => {
+      if (event.lengthComputable) onProgress?.((event.loaded / event.total) * 100);
+    });
+    xhr.addEventListener('load', () => {
+      let body = null;
+      try {
+        body = JSON.parse(xhr.responseText || '{}');
+      } catch {
+        body = null;
+      }
+      if (xhr.status >= 200 && xhr.status < 300 && body?.job) {
+        resolve(body);
+        return;
+      }
+      reject(new Error(body?.detail || body?.error || `Upload failed (${xhr.status}).`));
+    });
+    xhr.addEventListener('error', () => {
+      reject(new Error('Network error while uploading the EEG file.'));
+    });
+    xhr.addEventListener('timeout', () => {
+      reject(new Error('The upload timed out before the server received the file.'));
+    });
+
+    const form = new FormData();
+    form.append('file', file, file.name);
+    form.append('sfreq', String(sfreq));
+    xhr.send(form);
+  });
+}
+
+async function pollEEGJob(jobId) {
+  const started = Date.now();
+  const timeout = 8 * 60 * 1000;
+  let failures = 0;
+  while (Date.now() - started < timeout) {
+    let job;
+    try {
+      job = await fetchJSON(`/api/eeg/jobs/${encodeURIComponent(jobId)}`);
+      failures = 0;
+    } catch (error) {
+      // A Render cold start or a transient network blip should not discard a job that
+      // is still running server-side. Give up only after a short run of failures.
+      failures += 1;
+      if (failures >= 6) throw error;
+      setEEGStatus(`Connection interrupted; retrying (${failures}/6)…`, 'is-busy');
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      continue;
+    }
+    if (job.message) {
+      setEEGStatus(job.message, job.state === 'error' ? 'is-error' : 'is-busy');
+    }
+    const progress = Number(job.progress);
+    if (Number.isFinite(progress)) {
+      setEEGProgress(25 + clamp(progress, 0, 1) * 75);
+    }
+    if (job.state === 'done') return job;
+    if (job.state === 'error') {
+      throw new Error(job.error || 'The uploaded EEG could not be processed.');
+    }
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+  }
+  throw new Error(
+    'The re-lift is taking longer than expected. The free instance may be busy; '
+    + 'try a shorter recording or check the service logs.',
+  );
+}
+
+async function completeEEGUpload(job) {
+  const entry = job.scenario;
+  if (!entry?.manifest) throw new Error('The upload finished without a manifest.');
+
+  const existing = state.scenarios.findIndex((scenario) => scenario.key === entry.key);
+  if (existing >= 0) state.scenarios[existing] = entry;
+  else state.scenarios.push(entry);
+
+  // Keep the condition switcher compact; the server also keeps only a few jobs.
+  const uploads = state.scenarios.filter((scenario) => scenario.recorded);
+  if (uploads.length > 2) {
+    const retired = new Set(uploads.slice(0, uploads.length - 2).map((scenario) => scenario.key));
+    state.scenarios = state.scenarios.filter((scenario) => !retired.has(scenario.key));
+  }
+  // Renumber after pruning so two surviving uploads cannot share a label.
+  state.scenarios
+    .filter((scenario) => scenario.recorded)
+    .forEach((scenario, index) => {
+      scenario.label = index ? `Recorded EEG ${index + 1}` : 'Recorded EEG';
+    });
+
+  renderModeToggle();
+  await loadScenario(entry.key, { keepFrame: false });
+  state.uploading = false;
+  resetEEGForm();
+  setEEGStatus('Recorded EEG loaded. Only density, opacity and spread changed.', 'is-ok');
+  dom.eegModal.hidden = true;
+  toast(
+    `Recorded EEG loaded · ${job.n_epochs}→${job.n_beats} beats · `
+    + `salience ${Number(job.scenario.salience_mean || 0).toFixed(2)}`,
+    7000,
+  );
+}
+
+async function submitEEG() {
+  if (state.uploading || !state.uploadFile) return;
+  const sfreq = Number(dom.eegSfreq.value);
+  if (!Number.isFinite(sfreq) || sfreq < 100 || sfreq > 2000) {
+    setEEGStatus('Enter a sampling rate between 100 and 2000 Hz.', 'is-error');
+    return;
+  }
+
+  state.uploading = true;
+  dom.eegSubmit.disabled = true;
+  dom.eegSubmit.textContent = 'Uploading…';
+  setEEGProgress(2);
+  setEEGStatus('Uploading the recording…', 'is-busy');
+  setBusy(true);
+
+  try {
+    const queued = await uploadEEGFile(state.uploadFile, sfreq, (percent) => {
+      setEEGProgress(2 + percent * 0.2);
+      setEEGStatus(`Uploading the recording · ${Math.round(percent)}%`, 'is-busy');
+    });
+    setEEGProgress(25);
+    setEEGStatus('Queued. Analysing posterior EEG bands…', 'is-busy');
+    const done = await pollEEGJob(queued.job);
+    await completeEEGUpload(done);
+  } catch (error) {
+    state.uploading = false;
+    dom.eegSubmit.disabled = !state.uploadFile;
+    dom.eegSubmit.textContent = 'Condition volume';
+    setEEGProgress(0);
+    setEEGStatus(error?.message || String(error), 'is-error');
+  } finally {
+    setBusy(false);
+    if (!state.uploading) {
+      dom.eegSubmit.disabled = !state.uploadFile;
+      dom.eegSubmit.textContent = 'Condition volume';
+    }
+  }
+}
+
 /* -------------------------------------------------------------------- events */
 function bind() {
   dom.play.addEventListener('click', () => setPlaying(!state.playing));
@@ -623,6 +874,40 @@ function bind() {
   dom.modal.addEventListener('click', (event) => {
     if (event.target.closest('[data-close]')) closeModal();
   });
+
+  dom.eegBtn.addEventListener('click', openEEGModal);
+  dom.eegModal.addEventListener('click', (event) => {
+    if (event.target.closest('[data-eeg-close]')) closeEEGModal();
+  });
+  dom.eegDrop.addEventListener('click', () => dom.eegFile.click());
+  dom.eegDrop.addEventListener('keydown', (event) => {
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      event.stopPropagation();
+      dom.eegFile.click();
+    }
+  });
+  dom.eegFile.addEventListener('change', (event) => {
+    setEEGFile(event.target.files?.[0]);
+  });
+  for (const type of ['dragenter', 'dragover']) {
+    dom.eegDrop.addEventListener(type, (event) => {
+      event.preventDefault();
+      dom.eegDrop.classList.add('is-over');
+    });
+  }
+  for (const type of ['dragleave', 'drop']) {
+    dom.eegDrop.addEventListener(type, (event) => {
+      event.preventDefault();
+      dom.eegDrop.classList.remove('is-over');
+    });
+  }
+  dom.eegDrop.addEventListener('drop', (event) => {
+    const file = event.dataTransfer?.files?.[0];
+    if (file) setEEGFile(file);
+  });
+  dom.eegSubmit.addEventListener('click', submitEEG);
+
   dom.lightbox.addEventListener('click', (event) => {
     if (event.target === dom.lightbox || event.target.closest('.lightbox-close')) closeLightbox();
   });
@@ -647,6 +932,10 @@ function bind() {
 
     if (!dom.lightbox.hidden) {
       if (event.key === 'Escape') closeLightbox();
+      return;
+    }
+    if (!dom.eegModal.hidden) {
+      if (event.key === 'Escape') closeEEGModal();
       return;
     }
     if (!dom.modal.hidden) {

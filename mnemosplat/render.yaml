@@ -4,7 +4,8 @@
 # that parent folder instead (it sets dockerContext: ./mnemosplat).
 #
 # The image builds the web client, installs the Python package, and generates the
-# offline focus/distracted assets at image-build time. No GPU, API key, or disk needed.
+# offline focus/distracted assets at image-build time. No GPU or API key needed;
+# recorded-EEG uploads write only temporary assets at runtime.
 
 services:
   - type: web
@@ -18,8 +19,9 @@ services:
     autoDeployTrigger: commit
 
     envVars:
-      # Serve the baked demo read-only. Generation endpoints return 403 unless
-      # MNS_ADMIN_TOKEN is also set (then require X-MNS-Token).
+      # Serve the baked demo. Paid generation endpoints return 403 unless
+      # MNS_ADMIN_TOKEN is also set (then require X-MNS-Token). Recorded-EEG
+      # uploads are public, CPU-only, and never call a model.
       - key: MNS_PUBLIC_DEMO
         value: "1"
       - key: MNS_LOG
@@ -28,6 +30,9 @@ services:
         value: /app/out/demo
       - key: MNS_WEB_DIST
         value: /app/web/dist
+      # Lower this if free-plan uploads are too slow. The baked pair stays at 120k.
+      - key: MNS_EEG_TARGET_SPLATS
+        value: "60000"
 
       # Optional. Leave unset for the offline demo. Add both MODEL_API_KEY and
       # MNS_ADMIN_TOKEN only if you want authenticated on-demand generation.

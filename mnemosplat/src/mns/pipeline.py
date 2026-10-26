@@ -29,7 +29,7 @@ from PIL import Image, ImageFilter
 from .depth import DepthEstimator
 from .director.meta_client import MetaModelAPI
 from .director.scene_graph import build_scene_graph, refine_with_sam
-from .eeg import EEGRecording, analyze_epochs, generate_eeg
+from .eeg import EEGRecording, SalienceCalibrator, analyze_epochs, generate_eeg
 from .export.ply import export_cloud
 from .fusion.attention import (
     assign_object_salience,
@@ -43,7 +43,7 @@ from .geometry.preview import rasterize, turntable
 from .render import KeyframeError, KeyframeResult, muse_keyframe, procedural_keyframe
 from .render.procedural import depth_preview
 from .scenarios import Scenario, get_scenario
-from .schemas import CameraModel, FrameManifest, Manifest
+from .schemas import CameraModel, EpochFeatures, FrameManifest, Manifest
 from .util import configure_logging, read_json, stable_hash, write_json
 
 log = logging.getLogger("mns.pipeline")
@@ -117,6 +117,9 @@ def run_episode(
     graph_override=None,
     keyframe_override: str | Path | None = None,
     depth_override: str | Path | None = None,
+    features_override: list[EpochFeatures] | None = None,
+    calibrator_override: SalienceCalibrator | None = None,
+    band_table_override: dict[str, float] | None = None,
 ) -> EpisodeResult:
     cfg = cfg or PipelineConfig()
     started = time.perf_counter()
@@ -165,29 +168,47 @@ def run_episode(
         )
 
     # -------------------------------------------------------------------- 2. EEG
-    n_epochs = max(3, len(graph.beats))
-    if recording is None:
-        rec = generate_eeg(
-            duration_s=n_epochs * cfg.epoch_s,
-            epoch_s=cfg.epoch_s,
-            focus_schedule=np.array(scen.focus),
-            lateralization_schedule=np.array(scen.lateralization),
-            seed=scen.seed,
+    # ``features_override`` is used by the recorded-upload path: the caller has already
+    # analysed the full recording and reduced it to the manifest's beat count. The
+    # synthetic path below is unchanged.
+    if features_override is not None:
+        feats = list(features_override)
+        if not feats:
+            raise ValueError("features_override is empty")
+        calibrator = calibrator_override or SalienceCalibrator()
+        band_table = dict(band_table_override or {})
+        band_table.setdefault(
+            "gamma_theta_mean",
+            float(np.mean([epoch.gamma_theta for epoch in feats])),
         )
-        upstream["eeg"] = "synthetic:v1"
-        notes.append(
-            "EEG is synthetic (mns.eeg.synthetic): spectrally realistic, but not recorded. "
-            "Swap in THINGS-EEG2 / BrainVis features for a live study."
-        )
+        if recording is None:
+            upstream["eeg"] = "features"
+        else:
+            upstream["eeg"] = "file" if not recording.synthetic else "synthetic:v1"
     else:
-        rec = recording
-        upstream["eeg"] = "file" if not rec.synthetic else "synthetic:v1"
+        n_epochs = max(3, len(graph.beats))
+        if recording is None:
+            rec = generate_eeg(
+                duration_s=n_epochs * cfg.epoch_s,
+                epoch_s=cfg.epoch_s,
+                focus_schedule=np.array(scen.focus),
+                lateralization_schedule=np.array(scen.lateralization),
+                seed=scen.seed,
+            )
+            upstream["eeg"] = "synthetic:v1"
+            notes.append(
+                "EEG is synthetic (mns.eeg.synthetic): spectrally realistic, but not "
+                "recorded. Swap in THINGS-EEG2 / BrainVis features for a live study."
+            )
+        else:
+            rec = recording
+            upstream["eeg"] = "file" if not rec.synthetic else "synthetic:v1"
 
-    feats, calibrator, band_table = analyze_epochs(
-        rec,
-        epoch_s=cfg.epoch_s,
-        calibration=cfg.calibration,
-    )
+        feats, calibrator, band_table = analyze_epochs(
+            rec,
+            epoch_s=cfg.epoch_s,
+            calibration=cfg.calibration,
+        )
     upstream["eeg_calibration"] = f"{calibrator.mode}:center={calibrator.center:.3f}"
 
     # ------------------------------------------------------ 3. keyframe + depth

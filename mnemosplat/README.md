@@ -36,7 +36,7 @@ posterior EEG ──► Welch PSD ──► salience + attention field M(u,v) �
 | Meta Model API (Muse Spark / Muse Image / SAM 3.1 / Muse Voice) | Implemented, **not executed here** — no `MODEL_API_KEY` |
 | Depth-Anything-V2 on CPU/GPU | Optional; `torch`/`transformers` not installed in this venv |
 | BrainVis learned salience encoder | Interface + artifact check shipped; checkpoints are request-only |
-| EEG | **Synthetic** and labelled as such in every manifest |
+| EEG | **Synthetic** comparison pair; public **recorded CSV/NPY upload** is labelled `recorded EEG` |
 | Clinical / PTSD claims | Not made. This is a systems prototype, not a diagnostic |
 
 There is no ground-truth target image anywhere in the pipeline. The procedural
@@ -75,7 +75,7 @@ Useful checks:
 mnemosplat doctor                 # capability report; add --probe to call GET /models
 mnemosplat selftest               # tiny 256 px episode, CPU only
 mnemosplat export out/demo/focus/frames/000.splat /tmp/frame.ply
-python -m pytest -q               # 52 tests
+python -m pytest -q               # 74 tests
 ruff check src tests
 ```
 
@@ -88,7 +88,8 @@ without regenerating anything; the Docker image performs the same step at build 
 
 The repository includes a multi-stage `Dockerfile` and a Render Blueprint. The image
 builds the Vite client, installs the Python package, and generates the offline
-focus/distracted assets **at build time**; runtime needs no GPU, API key, or disk.
+focus/distracted assets **at build time**; runtime needs no GPU or API key. The only
+runtime writes are ephemeral recorded-EEG uploads under `/app/out/demo/live`.
 Use the Docker runtime (not Render's native Python runtime): the assets are produced
 inside the image, and `out/` is intentionally not committed.
 
@@ -97,13 +98,15 @@ If the repository root contains `mnemosplat/`, use the parent `render.yaml`. If
 
 1. Push the repository to GitHub.
 2. In Render: **New → Blueprint**, select the repo, apply the detected `render.yaml`.
-3. Leave `MODEL_API_KEY` and `MNS_ADMIN_TOKEN` empty for the read-only demo.
+3. Leave `MODEL_API_KEY` and `MNS_ADMIN_TOKEN` empty for the static demo; paid generation stays blocked, but recorded EEG uploads remain available.
 4. Open the HTTPS service URL. WebXR on Quest needs that secure context.
 
 `MNS_PUBLIC_DEMO=1` blocks the paid generation endpoints with `403` unless an
-`MNS_ADMIN_TOKEN` is configured and supplied as `X-MNS-Token`; the demo only reads the
-baked assets. Health check: `/api/health`. Free-plan services spin down when idle, so
-the first request can take 30–60 seconds.
+`MNS_ADMIN_TOKEN` is configured and supplied as `X-MNS-Token`; the paid generation
+path only reads the baked assets. `POST /api/eeg` remains public because it is CPU-only
+and never calls a paid model. Health check: `/api/health`. Free-plan services spin
+down when idle, so the first request can take 30–60 seconds; an uploaded re-lift can
+take a minute or more on the free CPU allocation.
 
 Full instructions, environment variables, verification commands, and troubleshooting:
 [docs/DEPLOY_RENDER.md](docs/DEPLOY_RENDER.md).
@@ -132,6 +135,76 @@ Full instructions, environment variables, verification commands, and troubleshoo
 
 Keyboard: `←/→` epoch, `Space` play, `F`/`D` condition, `1`/`2` condition, `R`
 recentre, `H` hide HUD, `A` salience field, `Esc` close.
+
+---
+
+## Bring your own recorded EEG
+
+The public demo has an **Upload EEG** button. It accepts a recording, analyses the
+posterior bands, and re-lifts the *already baked* keyframe and depth map with the
+recorded salience. The uploaded recording is labelled **recorded EEG** in the HUD,
+the provenance chips and `manifest.upstream`; the original focus/distracted pair stays
+labelled **synthetic EEG**.
+
+What changes: density, opacity, Gaussian covariance and sampling. What does not
+change: transcript, scene graph, keyframe RGB pixels, depth map, or the camera model
+(FOV/intrinsics). The viewer keeps its existing framing when you switch conditions.
+
+### Accepted files
+
+| Format | Contract |
+| --- | --- |
+| `.csv`, `.tsv`, `.txt` | Header row recommended, one row per sample. Channels are named (`O1`, `EEG O2`, `Pz`, ...). An optional time column (`time`, `timestamp`, `seconds`, `time_ms`, ...) is removed and used to infer the sampling rate. |
+| `.npy` | A 2-D numeric array, either `(channels, samples)` or `(samples, channels)`. NumPy files carry no rate or channel labels, so enter the sampling rate; generic channel names are used. |
+
+`EDF`/`BDF`/EEGLAB/BrainVision are rejected with an export hint rather than adding a
+heavy reader to the public deployment. Export CSV or NPY for now.
+
+Example CSV:
+
+```csv
+time,O1,O2,Oz,P3,P4,Pz
+0.000,12.4,-8.1,3.2,5.4,-1.2,0.4
+0.004,11.9,-7.6,3.8,4.9,-0.8,0.1
+...
+```
+
+### Limits and behaviour
+
+- **Length:** at least three 0.75 s windows (2.25 s). Longer recordings are analysed
+  in full and reduced to the four narrative beats. At least 100 Hz and at most 2000 Hz;
+  gamma needs a Nyquist frequency above 45 Hz.
+- **Size:** 12 MB per file, at most 32 channels and 3,000,000 parsed values.
+- **Public budget:** one re-lift at a time, four uploads per 15 minutes per address,
+  and a lower default splat budget (`MNS_EEG_TARGET_SPLATS=60000`) than the baked
+  120k demo. All defaults are environment-overridable; see `GET /api/health`.
+- **Cost:** the upload path never calls Muse Spark, Muse Image, SAM, Voice Transcribe,
+  or any paid endpoint. It also sets the Meta client key to empty as a hard guard.
+- **Storage:** uploads are written to `MNS_OUT/live/eeg-<id>/` and are **ephemeral**.
+  They disappear on a service restart or redeploy. The UI keeps at most two uploaded
+  conditions in the current session; the server keeps four completed jobs.
+- **Privacy:** files are processed in memory and are not written outside the service's
+  temporary asset directory. Do not upload clinical or identifiable data to a public
+  demo. No diagnosis is made.
+
+### API
+
+```bash
+curl -fsS -X POST https://YOUR-SERVICE.onrender.com/api/eeg \
+  -F "file=@recording.csv" \
+  -F "sfreq=250"
+
+# {"job":"<id>","state":"queued","key":"eeg-<id>"}
+
+curl -fsS https://YOUR-SERVICE.onrender.com/api/eeg/jobs/<id>
+```
+
+The job progresses through `queued → analyzing → lifting → done` (or `error`). On
+success, `scenario.manifest` is a path under `/assets/live/eeg-<id>/manifest.json`;
+the client adds it as a condition automatically. The keyframe is pixel-identical to
+the baked base episode and the depth array is unchanged; the upload manifest records
+the source filename, analysed window count, beat count, sampling rate and channel
+count.
 
 ---
 
@@ -221,10 +294,10 @@ adb reverse tcp:8000 tcp:8000
 For Wi-Fi, put the server behind HTTPS (Caddy/Cloudflare tunnel) because WebXR
 requires a secure context.
 
-Performance budget: 512×512 keyframe, ≤ 262,144 splats hard cap, 120k target,
-~3.9 MB per `.splat`, 4 frames per condition. The client loads one frame at a time and
-coalesces rapid timeline scrubs; it removes the previous scene rather than keeping four
-volumes resident on the headset.
+Performance budget: 512×512 keyframe, ≤ 262,144 splats hard cap, 120k target for the
+baked pair and 60k for public uploads, ~3.9 MB per baked `.splat`, 4 frames per
+condition. The client loads one frame at a time and coalesces rapid timeline scrubs; it
+removes the previous scene rather than keeping four volumes resident on the headset.
 
 ---
 
@@ -233,7 +306,7 @@ volumes resident on the headset.
 ```text
 mnemosplat/
   src/mns/
-    eeg/           synthetic EEG, Welch PSD, calibration, BrainVis bridge
+    eeg/           synthetic + recorded ingest, Welch PSD, calibration, BrainVis bridge
     director/      prompts, Meta client, recipes, layout sanitiser
     fusion/        attention field, per-entity salience, overlays
     render/        Muse Image + procedural keyframe providers

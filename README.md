@@ -17,11 +17,13 @@ The project lives in [`mnemosplat/`](mnemosplat/). Start there:
 
 This repository root includes [`render.yaml`](render.yaml) for a monorepo deploy. It
 builds `mnemosplat/Dockerfile` with `mnemosplat/` as the Docker context. The image
-builds the Vite client and bakes the offline focus/distracted assets; no GPU, API key,
-or disk is required at runtime. The demo is public and read-only by default.
+builds the Vite client and bakes the offline focus/distracted assets; no GPU or API key
+is required at runtime. The baked demo is public; paid generation is blocked, while
+recorded-EEG uploads remain available and write only temporary assets.
 
 If you push `mnemosplat/` itself as the repository root instead, use
 [`mnemosplat/render.yaml`](mnemosplat/render.yaml).
 
-EEG is synthetic and labelled as such. This is a systems prototype, not a diagnostic
-or a clinical claim.
+The baked comparison conditions use synthetic EEG, labelled as such. Uploaded
+recordings are labelled recorded EEG. This is a systems prototype, not a diagnostic or
+a clinical claim.

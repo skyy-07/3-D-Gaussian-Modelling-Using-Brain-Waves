@@ -35,6 +35,18 @@
 
       <div class="top-actions">
         <div id="mode" class="mode" role="group" aria-label="Memory condition"></div>
+        <button
+          id="eeg-upload-btn"
+          class="upload-btn"
+          type="button"
+          title="Condition this memory with a recorded EEG file"
+          aria-label="Upload recorded EEG"
+        >
+          <svg viewBox="0 0 16 16" fill="none" aria-hidden="true">
+            <path d="M1 8h2.1l1.2-4 2.1 8L8.2 5l1.3 5 1.2-2H15" stroke="currentColor" stroke-width="1.35" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+          <span>Upload EEG</span>
+        </button>
         <button id="about-btn" class="round-btn" type="button" title="About this demo" aria-label="About this demo">?</button>
       </div>
 
@@ -125,7 +137,7 @@
           <div class="boot-bar"><i id="boot-fill"></i></div>
           <div id="boot-status" class="boot-status mono">reading episode index…</div>
         </div>
-        <div class="boot-foot mono">synthetic EEG · research demo · not a medical device</div>
+        <div class="boot-foot mono">synthetic or uploaded EEG · research demo · not a medical device</div>
       </div>
 
       <div id="busy" class="busy" aria-hidden="true"><i></i></div>
@@ -184,10 +196,73 @@
           <div id="modal-provenance" class="modal-prov"></div>
 
           <p class="modal-fine">
-            This demo uses <strong>synthetic EEG</strong> generated with realistic
-            spectral statistics. It is a systems prototype, not a clinical instrument or
-            a diagnostic. Real EEG, IRB approval and a held-out ground-truth protocol are
-            required before any claim about PTSD or memory accuracy.
+            The two comparison conditions use <strong>synthetic EEG</strong> generated
+            with realistic spectral statistics. You can also upload a recorded CSV or
+            NPY file: it is labelled <strong>recorded EEG</strong> and changes only
+            density, opacity and spread — never the image. This is a systems prototype,
+            not a clinical instrument or a diagnostic. Real EEG, IRB approval and a
+            held-out ground-truth protocol are required before any claim about PTSD or
+            memory accuracy.
+          </p>
+        </article>
+      </div>
+
+      <div id="eeg-modal" class="modal" hidden>
+        <div class="modal-scrim" data-eeg-close></div>
+        <article class="modal-card eeg-card" role="dialog" aria-modal="true" aria-labelledby="eeg-title">
+          <button class="modal-close" type="button" data-eeg-close aria-label="Close">×</button>
+          <div class="mono modal-kicker">Recorded EEG · public demo</div>
+          <h2 id="eeg-title">Put your brain in the room.</h2>
+          <p>
+            Upload a recording and the same baked transcript, scene graph, keyframe and
+            depth map are re-lifted. Your EEG changes only density, opacity and spread.
+            It never changes the shared keyframe, its RGB pixels, or the depth map. The
+            result is added as a new condition you can compare with the synthetic pair.
+          </p>
+
+          <div id="eeg-drop" class="eeg-drop" tabindex="0" role="button" aria-label="Choose or drop an EEG file">
+            <input
+              id="eeg-file"
+              type="file"
+              accept=".csv,.tsv,.txt,.npy,text/csv,application/octet-stream"
+              hidden
+            />
+            <svg viewBox="0 0 24 24" fill="none" aria-hidden="true">
+              <path d="M3 12h3l2-6 3.5 12L15 8l2 4h4" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <strong id="eeg-drop-title">Drop an EEG file here</strong>
+            <span id="eeg-drop-hint">CSV with channel columns, or NPY · max 12 MB</span>
+          </div>
+
+          <div class="eeg-fields">
+            <label for="eeg-sfreq">Sampling rate <span>Hz</span></label>
+            <input id="eeg-sfreq" type="number" min="100" max="2000" step="1" value="250" inputmode="numeric" />
+          </div>
+          <p class="eeg-help">
+            <strong>CSV</strong> — first row headers, one row per sample, for example
+            <span class="mono">time,O1,O2,Oz,P3,P4,Pz</span>. A time column in
+            seconds, milliseconds or microseconds overrides the sampling-rate field.
+            <strong>NPY</strong> — a 2-D numeric array in
+            <span class="mono">(channels, samples)</span> or
+            <span class="mono">(samples, channels)</span> order. EDF/BDF are not
+            supported yet; export CSV or NPY. At least 2.25 s (three 0.75 s windows) is
+            required. Channel names O1/O2/P3/P4/Oz/Pz enable the hemifield prior.
+          </p>
+
+          <div id="eeg-progress" class="eeg-progress" aria-hidden="true"><i id="eeg-progress-fill"></i></div>
+          <div id="eeg-status" class="eeg-status" role="status" aria-live="polite">
+            Choose a recording to begin.
+          </div>
+
+          <div class="eeg-actions">
+            <button id="eeg-submit" class="eeg-submit" type="button" disabled>Condition volume</button>
+            <button class="eeg-cancel" type="button" data-eeg-close>Cancel</button>
+          </div>
+
+          <p class="modal-fine">
+            Recorded EEG is treated as research data, not clinical data. No diagnosis is
+            made. Processing happens in this demo service and the generated volume is
+            temporary: it disappears when the service restarts or redeploys.
           </p>
         </article>
       </div>

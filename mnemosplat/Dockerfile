@@ -64,7 +64,8 @@ RUN mnemosplat demo \
         --no-preview
 
 # Copy the client after asset generation so a web-only change does not rebuild the
-# demo. /app/out is writable by `app` for the admin-only live generation endpoint.
+# demo. /app/out is writable by `app` for admin-only generation and public recorded-EEG
+# re-lifts; Render treats this filesystem as ephemeral.
 COPY --from=web --chown=app:app /web/dist ./web/dist
 
 EXPOSE 8000

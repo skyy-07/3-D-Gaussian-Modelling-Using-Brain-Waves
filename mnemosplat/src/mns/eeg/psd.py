@@ -257,3 +257,84 @@ def analyze_epochs(
         "sfreq": sfreq,
     }
     return epochs, cal, table
+
+
+_AGGREGATE_FIELDS = (
+    "theta",
+    "alpha",
+    "beta",
+    "gamma",
+    "gamma_theta",
+    "lateralization",
+    "certainty",
+    "salience",
+    "focus_index",
+)
+
+
+def aggregate_epochs(
+    epochs: list[EpochFeatures],
+    n_bins: int,
+    epoch_s: float = 0.75,
+) -> list[EpochFeatures]:
+    """Aggregate a long recording into the fixed consolidation beats of a memory.
+
+    The public upload path analyses the whole recording (Welch PSD per 0.75 s window)
+    and then reduces those windows to the number of narrative beats. That keeps the
+    uploaded EEG a single control variable while still using the entire file: long
+    files average contiguous windows into each beat, short files interpolate between
+    neighbouring windows. Time stamps are reset to beat-relative seconds so the
+    existing frame labels and the attention-field alignment stay unchanged.
+    """
+    if not epochs:
+        raise ValueError("cannot aggregate an empty epoch list")
+    n_bins = max(1, int(n_bins))
+    source = list(epochs)
+
+    groups: list[list[EpochFeatures]] | None = None
+    if len(source) >= n_bins:
+        groups = [
+            [source[int(i)] for i in group]
+            for group in np.array_split(np.arange(len(source)), n_bins)
+        ]
+
+    channels = sorted({name for epoch in source for name in epoch.channels_used})
+    out: list[EpochFeatures] = []
+    for i in range(n_bins):
+        if groups is not None:
+            group = groups[i]
+            row = {
+                key: float(np.mean([getattr(epoch, key) for epoch in group]))
+                for key in _AGGREGATE_FIELDS
+            }
+        else:
+            pos = i * (len(source) - 1) / max(1, n_bins - 1)
+            lo = int(np.floor(pos))
+            hi = min(lo + 1, len(source) - 1)
+            frac = float(pos - lo)
+            row = {
+                key: float(
+                    getattr(source[lo], key) * (1.0 - frac)
+                    + getattr(source[hi], key) * frac
+                )
+                for key in _AGGREGATE_FIELDS
+            }
+
+        out.append(
+            EpochFeatures(
+                index=i,
+                t0=round(i * float(epoch_s), 4),
+                t1=round((i + 1) * float(epoch_s), 4),
+                theta=round(max(0.0, row["theta"]), 6),
+                alpha=round(max(0.0, row["alpha"]), 6),
+                beta=round(max(0.0, row["beta"]), 6),
+                gamma=round(max(0.0, row["gamma"]), 6),
+                gamma_theta=round(max(0.0, row["gamma_theta"]), 6),
+                lateralization=round(clamp(row["lateralization"], -1.0, 1.0), 4),
+                certainty=round(clamp(row["certainty"], 0.0, 1.0), 4),
+                salience=round(clamp(row["salience"], 0.1, 1.0), 4),
+                focus_index=round(clamp(row["focus_index"], 0.0, 1.0), 4),
+                channels_used=channels,
+            )
+        )
+    return out
