@@ -1,0 +1,37 @@
+# Render Blueprint when mnemosplat/ is the repository root.
+#
+# If you deploy from a monorepo whose root contains mnemosplat/, use the render.yaml in
+# that parent folder instead (it sets dockerContext: ./mnemosplat).
+#
+# The image builds the web client, installs the Python package, and generates the
+# offline focus/distracted assets at image-build time. No GPU, API key, or disk needed.
+
+services:
+  - type: web
+    name: mnemosplat
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+
+    envVars:
+      # Serve the baked demo read-only. Generation endpoints return 403 unless
+      # MNS_ADMIN_TOKEN is also set (then require X-MNS-Token).
+      - key: MNS_PUBLIC_DEMO
+        value: "1"
+      - key: MNS_LOG
+        value: INFO
+      - key: MNS_OUT
+        value: /app/out/demo
+      - key: MNS_WEB_DIST
+        value: /app/web/dist
+
+      # Optional. Leave unset for the offline demo. Add both MODEL_API_KEY and
+      # MNS_ADMIN_TOKEN only if you want authenticated on-demand generation.
+      - key: MODEL_API_KEY
+        sync: false
+      - key: MNS_ADMIN_TOKEN
+        sync: false

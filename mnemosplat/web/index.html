@@ -1,0 +1,223 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#08090c" />
+    <meta
+      name="description"
+      content="MnemoSplat turns a spoken memory into a 3D Gaussian volume whose density is conditioned by EEG salience. Same words, different memory."
+    />
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%2308090c'/%3E%3Cpath d='M7 24V10l9 8.5L25 10v14' stroke='%23e9b25f' stroke-width='1.7' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E"
+    />
+    <title>MnemoSplat — same words, different memory</title>
+  </head>
+  <body>
+    <div id="app">
+      <div id="stage" aria-hidden="true"></div>
+      <div class="grain" aria-hidden="true"></div>
+      <div class="vignette" aria-hidden="true"></div>
+
+      <header class="brand">
+        <div class="brand-mark" aria-hidden="true">
+          <svg viewBox="0 0 32 32" fill="none" aria-hidden="true">
+            <path d="M6 25V9.5L16 19l10-9.5V25" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" />
+            <circle cx="16" cy="6" r="1.4" fill="currentColor" />
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>MnemoSplat</h1>
+          <p>EEG-conditioned memory volume</p>
+        </div>
+      </header>
+
+      <div class="top-actions">
+        <div id="mode" class="mode" role="group" aria-label="Memory condition"></div>
+        <button id="about-btn" class="round-btn" type="button" title="About this demo" aria-label="About this demo">?</button>
+      </div>
+
+      <div id="toast" class="toast" role="status" aria-live="polite"></div>
+
+      <aside id="readout" class="readout" aria-live="polite">
+        <div class="readout-head">
+          <div>
+            <span class="eyebrow">Neural salience</span>
+            <div class="salience-row">
+              <strong id="salience">—</strong>
+              <span id="salience-dial" class="dial" aria-hidden="true"><i></i></span>
+            </div>
+          </div>
+          <svg id="spark" class="spark" viewBox="0 0 120 44" preserveAspectRatio="none" aria-hidden="true"></svg>
+        </div>
+
+        <div class="section">
+          <div class="section-label"><span>Band power</span><span>relative</span></div>
+          <div id="bands" class="bands"></div>
+        </div>
+
+        <div class="section">
+          <div class="section-label"><span>Encoding telemetry</span><span>unit-free</span></div>
+          <div id="metrics" class="metrics"></div>
+        </div>
+
+        <div class="section grow">
+          <div class="section-label"><span>What the field holds</span><span>by object</span></div>
+          <div id="objects" class="objects"></div>
+        </div>
+
+        <div class="evidence">
+          <button id="ev-keyframe" class="ev-card" type="button" aria-label="Open keyframe">
+            <img id="keyframe-img" alt="Synthesised keyframe" />
+            <span>keyframe</span>
+          </button>
+          <button id="ev-attention" class="ev-card" type="button" aria-label="Open attention field">
+            <img id="attention-img" alt="EEG salience field over the keyframe" />
+            <span>salience field</span>
+          </button>
+        </div>
+      </aside>
+
+      <section class="story" aria-live="polite">
+        <div class="story-top">
+          <span id="beat" class="story-beat">—</span>
+          <span id="condition-chip" class="chip">—</span>
+        </div>
+        <blockquote id="narrative">—</blockquote>
+        <div id="provenance" class="provenance"></div>
+      </section>
+
+      <footer class="dock">
+        <button id="play" class="play" type="button" aria-label="Play consolidation">
+          <svg class="icon-play" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3.2 12 8l-7 4.8z" fill="currentColor" /></svg>
+          <svg class="icon-pause" viewBox="0 0 16 16" aria-hidden="true"><path d="M5 3h2v10H5zM9 3h2v10H9z" fill="currentColor" /></svg>
+        </button>
+
+        <div class="timeline">
+          <div class="timeline-head">
+            <span class="eyebrow">Memory consolidation</span>
+            <span id="epoch-count" class="mono">epoch 1 / 4</span>
+          </div>
+          <div class="slider-wrap">
+            <div class="slider-track" aria-hidden="true"><i id="slider-fill"></i></div>
+            <input id="scrub" type="range" min="0" max="3" step="1" value="0" aria-label="Consolidation epoch" />
+          </div>
+          <div id="ticks" class="ticks"></div>
+        </div>
+
+        <div class="dock-meta">
+          <span id="splat-count" class="mono">—</span>
+          <span class="dock-meta-label">gaussians</span>
+        </div>
+      </footer>
+
+      <div id="hint" class="hint mono">← → epoch · space play · F/D condition · R recentre · H hide UI</div>
+
+      <div id="boot" class="boot">
+        <div class="boot-inner">
+          <div class="boot-kicker mono">Meta hackathon · WebXR</div>
+          <h2>Same words.<br /><em>Different memory.</em></h2>
+          <p class="boot-lead">
+            A spoken memory becomes a 3D Gaussian volume. EEG salience decides how
+            vividly it consolidates — never what it looks like.
+          </p>
+          <div class="boot-bar"><i id="boot-fill"></i></div>
+          <div id="boot-status" class="boot-status mono">reading episode index…</div>
+        </div>
+        <div class="boot-foot mono">synthetic EEG · research demo · not a medical device</div>
+      </div>
+
+      <div id="busy" class="busy" aria-hidden="true"><i></i></div>
+
+      <div id="modal" class="modal" hidden>
+        <div class="modal-scrim" data-close></div>
+        <article class="modal-card" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+          <button class="modal-close" type="button" data-close aria-label="Close">×</button>
+          <div class="mono modal-kicker">The demo, honestly</div>
+          <h2 id="modal-title">One narrative. Two brain states.</h2>
+          <p>
+            Both conditions below receive the <strong>same transcript, same scene graph,
+            same keyframe and same depth map</strong>. The only variable is the
+            EEG-derived salience field. That is the whole experiment: same words,
+            different memory.
+          </p>
+
+          <div class="modal-grid">
+            <section>
+              <h3><b>01</b> Language → scene</h3>
+              <p>
+                Meta <span class="mono">muse-spark-1.3</span> turns the transcript into
+                entities, bounding boxes, depth hints and a beat sheet.
+                <span class="mono">muse-image-1.0</span> renders one photographic keyframe.
+                <span class="mono">sam-3.1</span> refines boxes to masks.
+              </p>
+            </section>
+            <section>
+              <h3><b>02</b> EEG → salience</h3>
+              <p>
+                Posterior theta, alpha, beta and gamma are reduced to band ratios,
+                spectral entropy, certainty and lateralisation. The result is a 2D
+                attention field. <strong>EEG never touches RGB pixels.</strong> It only
+                sets opacity, spread and density.
+              </p>
+            </section>
+            <section>
+              <h3><b>03</b> Depth → Gaussians</h3>
+              <p>
+                Single-view monocular depth lifts the keyframe into surfels sized by
+                their pixel footprint. Low-salience geometry becomes wide and
+                translucent; vivid geometry stays tight and opaque. One keyframe is
+                re-lifted per epoch, so the timeline scrubs consolidation, not camera
+                motion.
+              </p>
+            </section>
+          </div>
+
+          <div class="modal-callout">
+            <span class="mono">Zero ground-truth leakage</span>
+            The renderer never sees the target image of the memory. It sees a scene graph,
+            a synthesised keyframe and a salience field. Neither condition is allowed a
+            cleaner depth map, a better prompt or a different camera.
+          </div>
+
+          <div id="modal-provenance" class="modal-prov"></div>
+
+          <p class="modal-fine">
+            This demo uses <strong>synthetic EEG</strong> generated with realistic
+            spectral statistics. It is a systems prototype, not a clinical instrument or
+            a diagnostic. Real EEG, IRB approval and a held-out ground-truth protocol are
+            required before any claim about PTSD or memory accuracy.
+          </p>
+        </article>
+      </div>
+
+      <div id="lightbox" class="lightbox" hidden>
+        <button class="lightbox-close" type="button" aria-label="Close">×</button>
+        <figure>
+          <img id="lightbox-img" alt="" />
+          <figcaption id="lightbox-cap"></figcaption>
+        </figure>
+      </div>
+
+      <div id="xr-overlay" class="xr-overlay" aria-hidden="true">
+        <div class="xr-head">
+          <span class="xr-brand">MNEMOSPLAT</span>
+          <span id="xr-condition" class="xr-condition">vivid recall</span>
+        </div>
+        <div class="xr-main">
+          <button id="xr-prev" class="xr-btn" type="button" aria-label="Previous epoch">‹</button>
+          <div class="xr-read">
+            <span id="xr-epoch" class="mono">epoch 1 / 4</span>
+            <strong id="xr-salience">0.00</strong>
+            <span class="xr-cap">neural salience</span>
+          </div>
+          <button id="xr-next" class="xr-btn" type="button" aria-label="Next epoch">›</button>
+        </div>
+        <div class="xr-foot mono">trigger: next · squeeze: previous</div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.js"></script>
+  </body>
+</html>
