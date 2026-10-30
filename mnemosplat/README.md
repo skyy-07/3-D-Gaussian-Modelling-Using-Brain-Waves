@@ -2,6 +2,9 @@
 
 **Same words. Different memory.**
 
+**Live demo:** <https://mnemosplat.onrender.com> — first load can take 30–60 seconds on
+Render's free plan while the service wakes up.
+
 MnemoSplat turns a spoken episodic memory into a WebXR 3D Gaussian volume whose
 *density, opacity and spread* are conditioned by posterior EEG salience. The language
 model decides **what** is in the room; monocular depth decides **where** it is; EEG
@@ -76,7 +79,7 @@ Useful checks:
 mnemosplat doctor                 # capability report; add --probe to call GET /models
 mnemosplat selftest               # tiny 256 px episode, CPU only
 mnemosplat export out/demo/focus/frames/000.splat /tmp/frame.ply
-python -m pytest -q               # 74 tests
+python -m pytest -q               # 84 tests
 ruff check src tests
 ```
 
