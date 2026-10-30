@@ -1,6 +1,6 @@
 # CUDA worker for the experimental BrainVis branch. Build on a GPU host; the Render
 # CPU web image is a separate Dockerfile and must not include this.
-FROM nvidia/cuda:12.1.1-cudnn8-runtime-ubuntu22.04
+FROM nvidia/cuda:12.4.1-cudnn-runtime-ubuntu22.04
 
 ENV DEBIAN_FRONTEND=noninteractive \
     PYTHONUNBUFFERED=1 \
