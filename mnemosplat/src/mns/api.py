@@ -54,6 +54,7 @@ from .eeg import (
 )
 from .eeg.brainvis import resolve_brainvis
 from .pipeline import PipelineConfig, run_episode, run_pair, selftest
+from .reconstruct import BrainVisClient, WorkerStatus
 from .scenarios import get_scenario, list_scenarios
 from .schemas import Manifest
 from .util import configure_logging, read_json, write_json
@@ -93,6 +94,14 @@ EEG_RATE_MAX = max(1, _env_int("MNS_EEG_RATE_MAX", 4))
 EEG_RATE_WINDOW_S = max(30, _env_int("MNS_EEG_RATE_WINDOW_S", 900))
 EEG_KEEP_JOBS = max(1, _env_int("MNS_EEG_KEEP_JOBS", 4))
 EEG_EPOCH_S = 0.75  # matches the baked 4-beat narrative; not operator-tunable
+
+# BrainVis image reconstruction is an experimental GPU branch. The web process only
+# proxies to a separate CUDA worker; it never imports torch or generates pixels here.
+RECON_MAX_FRAMES = max(1, min(8, _env_int("MNS_RECON_MAX_FRAMES", 4)))
+RECON_WINDOW_S = 0.44  # BrainVis EEG-Image trials: 440 samples at 1 kHz
+RECON_CHANNELS = 128  # EEG-Image montage; order must match the checkpoint
+RECON_STATUS_TTL_S = max(2, _env_int("MNS_RECON_STATUS_TTL_S", 20))
+RECON_MIN_FRAMES = 1
 
 
 @asynccontextmanager
@@ -207,6 +216,40 @@ _eeg_jobs: dict[str, dict] = {}
 _eeg_rate: dict[str, deque[float]] = {}
 _eeg_lock = threading.Lock()
 _static_mounted = False
+_recon_status_lock = threading.Lock()
+_recon_status_cache: dict = {"at": 0.0, "value": None}
+
+
+def _reconstruct_client() -> BrainVisClient:
+    return BrainVisClient.from_env()
+
+
+def _reconstruct_enabled() -> bool:
+    """Whether this deployment is allowed to spend GPU time."""
+    return bool(_reconstruct_client().configured) and (
+        (not PUBLIC_DEMO) or bool(ADMIN_TOKEN)
+    )
+
+
+def _reconstruct_status(force: bool = False) -> WorkerStatus:
+    """Probe the GPU worker, with a short cache so /api/health stays cheap."""
+    client = _reconstruct_client()
+    if not client.configured:
+        return client.status()
+    now = time.time()
+    with _recon_status_lock:
+        cached = _recon_status_cache.get("value")
+        if (
+            not force
+            and isinstance(cached, WorkerStatus)
+            and now - float(_recon_status_cache.get("at") or 0.0) < RECON_STATUS_TTL_S
+        ):
+            return cached
+    status = client.status()
+    with _recon_status_lock:
+        _recon_status_cache["value"] = status
+        _recon_status_cache["at"] = time.time()
+    return status
 
 
 class EpisodeRequest(BaseModel):
@@ -344,8 +387,13 @@ def _prune_eeg_jobs() -> None:
         stale = finished[:-EEG_KEEP_JOBS] if len(finished) > EEG_KEEP_JOBS else []
         for job_id, _job in stale:
             _eeg_jobs.pop(job_id, None)
-    for job_id, _job in stale:
-        shutil.rmtree(OUT / "live" / f"eeg-{job_id}", ignore_errors=True)
+    for job_id, job in stale:
+        target = job.get("target")
+        if target:
+            shutil.rmtree(Path(target), ignore_errors=True)
+        else:
+            shutil.rmtree(OUT / "live" / f"eeg-{job_id}", ignore_errors=True)
+            shutil.rmtree(OUT / "live" / f"recon-{job_id}", ignore_errors=True)
 
 
 async def _read_limited(upload: UploadFile) -> bytes:
@@ -552,9 +600,165 @@ def _eeg_runner(
         _prune_eeg_jobs()
 
 
+def _brainvis_windows(recording, n_frames: int) -> np.ndarray:
+    """Take evenly spaced 440 ms windows, preserving the recording's channel order."""
+    duration = float(recording.duration_s)
+    if duration < RECON_WINDOW_S:
+        raise ValueError(
+            f"BrainVis needs at least one {RECON_WINDOW_S:g}s trial; "
+            f"this recording is {duration:.2f}s"
+        )
+    n_frames = max(1, min(int(n_frames), int(duration // RECON_WINDOW_S)))
+    starts = np.linspace(0.0, max(0.0, duration - RECON_WINDOW_S), n_frames)
+    samples = max(8, int(round(RECON_WINDOW_S * recording.sfreq)))
+    windows = []
+    for start in starts:
+        first = int(round(float(start) * recording.sfreq))
+        last = min(recording.signal.shape[1], first + samples)
+        window = np.asarray(recording.signal[:, first:last], dtype=np.float32)
+        if window.shape[1] != samples:
+            raise ValueError(
+                "could not extract a complete 0.44s BrainVis window from the recording"
+            )
+        windows.append(window)
+    return np.stack(windows, axis=0)
+
+
+def _reconstruct_runner(
+    job_id: str,
+    recording,
+    info: dict,
+    n_frames: int,
+) -> None:
+    """Send EEG windows to the GPU worker and store static reconstruction frames."""
+    job = _eeg_jobs.get(job_id)
+    if job is None:
+        return
+    target = OUT / "live" / f"recon-{job_id}"
+    started = time.time()
+    with _eeg_lock:
+        job.update(
+            state="running",
+            stage="reconstructing",
+            progress=0.1,
+            message="Sending EEG windows to the BrainVis GPU worker…",
+            started=started,
+            target=str(target),
+        )
+    try:
+        status = _reconstruct_status(force=True)
+        if not status.ready:
+            raise RuntimeError(status.reason)
+        client = _reconstruct_client()
+        windows = _brainvis_windows(recording, n_frames)
+        with _eeg_lock:
+            job.update(
+                progress=0.25,
+                message=(
+                    f"BrainVis · {len(windows)} independent windows · "
+                    "cascade diffusion (this can take minutes)…"
+                ),
+            )
+        result = client.reconstruct(
+            windows,
+            recording.sfreq,
+            recording.channels,
+            seed=info.get("seed"),
+        )
+        target.mkdir(parents=True, exist_ok=True)
+        images: list[dict] = []
+        for fallback_index, frame in enumerate(result.frames):
+            index = int(frame.index) if frame.index is not None else fallback_index
+            name = f"frame-{index:02d}.png"
+            (target / name).write_bytes(frame.png)
+            with Image.open(target / name) as image:
+                width, height = image.size
+            images.append(
+                {
+                    "index": index,
+                    "url": f"live/recon-{job_id}/{name}",
+                    "width": width,
+                    "height": height,
+                    "predicted_class": frame.predicted_class,
+                    "label": frame.label,
+                    "prompt": frame.prompt,
+                }
+            )
+        if not images:
+            raise RuntimeError("the GPU worker returned no frames")
+        meta = {
+            **result.meta,
+            "engine": "brainvis",
+            "kind": "experimental_static_reconstruction",
+            "window_s": RECON_WINDOW_S,
+            "frames": len(images),
+            "sfreq": round(float(recording.sfreq), 2),
+            "channels": len(recording.channels),
+        }
+        write_json(
+            target / "reconstruction.json",
+            {
+                "request": info,
+                "meta": meta,
+                "images": images,
+                "elapsed_s": round(time.time() - started, 2),
+            },
+        )
+        with _eeg_lock:
+            job.update(
+                state="done",
+                stage="done",
+                progress=1.0,
+                message=(
+                    "Experimental reconstruction ready. These are independent static "
+                    "frames, not a decoded video."
+                ),
+                images=images,
+                meta=meta,
+                n_frames=len(images),
+                elapsed_s=round(time.time() - started, 2),
+                finished=time.time(),
+            )
+        log.info(
+            "reconstruction job %s done in %.1fs: %d frames",
+            job_id,
+            time.time() - started,
+            len(images),
+        )
+    except Exception as exc:  # noqa: BLE001 - surface the failure to the polling client
+        log.exception("reconstruction job %s failed", job_id)
+        shutil.rmtree(target, ignore_errors=True)
+        with _eeg_lock:
+            job.update(
+                state="error",
+                stage="error",
+                progress=0.0,
+                message="The experimental reconstruction could not run.",
+                error=str(exc),
+                finished=time.time(),
+            )
+    finally:
+        _prune_eeg_jobs()
+
+
 @app.get("/api/health")
 def health() -> dict:
     api = MetaModelAPI()
+    recon = _reconstruct_status()
+    recon_body = recon.as_dict()
+    recon_body.update(
+        {
+            "enabled": _reconstruct_enabled(),
+            "max_frames": RECON_MAX_FRAMES,
+            "window_s": RECON_WINDOW_S,
+            "channels_required": RECON_CHANNELS,
+            "note": (
+                "Experimental BrainVis static-image branch. The CPU web service only "
+                "proxies to an external CUDA worker; it cannot run Stable Diffusion "
+                "on the Render free plan. Frames are independent, not video."
+            ),
+        }
+    )
     return {
         "ok": True,
         "version": app.version,
@@ -567,6 +771,7 @@ def health() -> dict:
         },
         "depth_learned": DepthEstimator().learned_available,
         "brainvis": resolve_brainvis(),
+        "reconstruction": recon_body,
         "web_built": WEB_DIST.exists(),
         "assets": str(OUT),
         "jobs": len(_jobs),
@@ -680,16 +885,36 @@ async def upload_eeg(
     file: UploadFile = File(...),
     sfreq: float = Form(250.0),
     base: str = Form("focus"),
+    mode: str = Form("condition"),
+    prompt: str = Form(""),
+    seed: int | None = Form(None),
 ) -> dict:
-    """Condition the baked memory volume from a recorded EEG file.
+    """Condition the baked volume, or run the experimental GPU reconstruction branch.
 
-    Public-safe by design: no Meta model call, no image synthesis, no new depth map.
-    The uploaded signal only changes the salience field used to re-lift the existing
-    keyframe/depth pair. Work runs asynchronously because the re-lift is CPU-bound on
-    Render's free plan.
+    ``mode=condition`` is the public, CPU-only salience path: the baked keyframe and
+    depth map are reused and only density changes. ``mode=reconstruct`` is a separate
+    experimental path that forwards 128-channel EEG windows to an external BrainVis
+    CUDA worker and returns static frames. It is disabled on a public deployment
+    unless an admin token is configured, and it never runs diffusion in this process.
     """
+    mode = (mode or "condition").strip().lower()
+    if mode not in {"condition", "reconstruct"}:
+        raise HTTPException(400, "mode must be `condition` or `reconstruct`")
+
+    if mode == "reconstruct":
+        _require_write_access(request)
+        status = _reconstruct_status(force=True)
+        if not status.configured:
+            raise HTTPException(503, status.reason)
+        if not status.ready:
+            raise HTTPException(503, status.reason)
+
     _check_eeg_access(request)
-    base_dir, base_manifest = _base_episode(base)
+    base_dir: Path | None = None
+    base_manifest: Manifest | None = None
+    if mode == "condition":
+        base_dir, base_manifest = _base_episode(base)
+
     raw = await _read_limited(file)
     filename = safe_filename(file.filename)
 
@@ -697,6 +922,61 @@ async def upload_eeg(
         recording = parse_eeg_upload(raw, filename=filename, sfreq=sfreq)
     except (EEGFormatError, ValueError) as exc:
         raise HTTPException(400, str(exc)) from exc
+
+    if mode == "reconstruct":
+        if len(recording.channels) != RECON_CHANNELS:
+            raise HTTPException(
+                400,
+                "BrainVis reconstruction requires exactly 128 EEG channels in the "
+                f"EEG-Image training order; this upload has {len(recording.channels)}. "
+                "Use the condition mode for an arbitrary montage, or export the "
+                "128-channel recording before reconstructing.",
+            )
+        if recording.duration_s < RECON_WINDOW_S:
+            raise HTTPException(
+                400,
+                f"BrainVis needs at least one {RECON_WINDOW_S:g}s trial; this recording "
+                f"is {recording.duration_s:.2f}s",
+            )
+        available = max(1, int(recording.duration_s // RECON_WINDOW_S))
+        n_frames = max(RECON_MIN_FRAMES, min(RECON_MAX_FRAMES, available))
+        job_id = uuid.uuid4().hex[:10]
+        info = {
+            "filename": filename,
+            "mode": "reconstruct",
+            "sfreq": round(float(recording.sfreq), 2),
+            "channels": len(recording.channels),
+            "duration_s": round(float(recording.duration_s), 2),
+            "bytes": len(raw),
+            "frames": n_frames,
+            "window_s": RECON_WINDOW_S,
+            "prompt": prompt.strip()[:400] or None,
+            "seed": seed,
+        }
+        job_state = {
+            "id": job_id,
+            "kind": "reconstruct",
+            "state": "queued",
+            "stage": "queued",
+            "progress": 0.0,
+            "message": "Queued for the experimental BrainVis GPU worker.",
+            "created": time.time(),
+            "filename": filename,
+            "sfreq": info["sfreq"],
+            "channels": info["channels"],
+            "duration_s": info["duration_s"],
+            "n_frames": n_frames,
+            "target": str(OUT / "live" / f"recon-{job_id}"),
+        }
+        with _eeg_lock:
+            _eeg_jobs[job_id] = job_state
+        _eeg_executor.submit(_reconstruct_runner, job_id, recording, info, n_frames)
+        return {
+            "job": job_id,
+            "state": job_state["state"],
+            "kind": "reconstruct",
+            "key": f"recon-{job_id}",
+        }
 
     step = max(16, int(EEG_EPOCH_S * recording.sfreq))
     usable = recording.signal.shape[1] // step
@@ -708,9 +988,11 @@ async def upload_eeg(
             f"{EEG_EPOCH_S:g}s windows ({minimum:.2f}s) are needed",
         )
 
+    assert base_dir is not None and base_manifest is not None
     job_id = uuid.uuid4().hex[:10]
     info = {
         "filename": filename,
+        "mode": "condition",
         "base": base_dir.name,
         "sfreq": round(float(recording.sfreq), 2),
         "channels": len(recording.channels),
@@ -720,6 +1002,7 @@ async def upload_eeg(
     }
     job_state = {
         "id": job_id,
+        "kind": "condition",
         "state": "queued",
         "stage": "queued",
         "progress": 0.0,
@@ -730,11 +1013,17 @@ async def upload_eeg(
         "channels": info["channels"],
         "duration_s": info["duration_s"],
         "base": base_dir.name,
+        "target": str(OUT / "live" / f"eeg-{job_id}"),
     }
     with _eeg_lock:
         _eeg_jobs[job_id] = job_state
     _eeg_executor.submit(_eeg_runner, job_id, recording, info, base_dir, base_manifest)
-    return {"job": job_id, "state": job_state["state"], "key": f"eeg-{job_id}"}
+    return {
+        "job": job_id,
+        "state": job_state["state"],
+        "kind": "condition",
+        "key": f"eeg-{job_id}",
+    }
 
 
 @app.get("/api/eeg/jobs/{job_id}")

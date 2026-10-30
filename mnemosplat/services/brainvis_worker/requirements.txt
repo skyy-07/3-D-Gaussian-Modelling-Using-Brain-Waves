@@ -1,0 +1,18 @@
+# Pinned to the versions used by RomGai/BrainVis. Install on a CUDA GPU host.
+numpy==1.26.0
+scipy>=1.13
+Pillow>=10.3
+fastapi>=0.115
+uvicorn[standard]>=0.30
+python-multipart>=0.0.9
+torch==2.5.1
+torchvision==0.20.1
+diffusers==0.29.2
+transformers==4.42.4
+accelerate>=0.33
+omegaconf==2.3.0
+einops==0.8.0
+torchmetrics==1.4.0.post0
+pytorch-lightning==2.3.3
+kornia==0.7.3
+ftfy==6.2.0

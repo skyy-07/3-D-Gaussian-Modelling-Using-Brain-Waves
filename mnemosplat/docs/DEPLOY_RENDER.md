@@ -270,6 +270,11 @@ adb reverse tcp:8000 tcp:8000
 - The image build is separate from the runtime instance and may take longer than a
   request. Watch the deploy log if the health check initially fails.
 - Render terminates TLS and forwards `PORT`; the Dockerfile binds `0.0.0.0:${PORT}`.
+- **The free plan cannot run BrainVis or Stable Diffusion.** If
+  `MNS_BRAINVIS_WORKER_URL` is set, the CPU app only proxies to an external CUDA host.
+  With no worker it reports `reconstruction.configured=false`; with a worker it reports
+  readiness, but the public route still requires `MNS_ADMIN_TOKEN`. See
+  [RECONSTRUCTION.md](RECONSTRUCTION.md).
 
 ---
 
@@ -288,6 +293,9 @@ adb reverse tcp:8000 tcp:8000
 | EEG upload returns 429 | The single EEG worker is busy or the per-IP rate limit was reached; retry after the job finishes or the window expires |
 | Uploaded condition disappears | Expected: uploads live under `/app/out/demo/live` and are not persisted across restarts/redeploys |
 | Upload is very slow | Free CPU; lower `MNS_EEG_TARGET_SPLATS`, shorten the recording, or use a larger instance |
+| Reconstruction returns 503 | No GPU worker configured, worker offline, or checkpoint/SD1.5/CUDA missing; read `reconstruction.reason` in `/api/health` |
+| Reconstruction returns 403 | Expected on a public demo without `MNS_ADMIN_TOKEN`; the GPU branch is admin-gated |
+| Reconstruction rejects 128 channels | BrainVis needs exactly the 128-channel EEG-Image montage; a 6-channel cap is not silently remapped |
 | Model calls fail | Unrelated to the offline demo; `MODEL_API_KEY` is optional |
 | Slow first request | Free-plan cold start; subsequent requests are fast |
 

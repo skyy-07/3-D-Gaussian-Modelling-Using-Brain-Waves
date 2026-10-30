@@ -41,3 +41,13 @@ services:
         sync: false
       - key: MNS_ADMIN_TOKEN
         sync: false
+
+      # Optional experimental BrainVis branch. This free CPU service cannot run
+      # BrainVis/SD1.5; these values must point at a separate CUDA worker. Leave
+      # unset to keep the reconstruction route disabled.
+      - key: MNS_BRAINVIS_WORKER_URL
+        sync: false
+      - key: MNS_BRAINVIS_WORKER_TOKEN
+        sync: false
+      - key: MNS_RECON_MAX_FRAMES
+        value: "4"

@@ -36,7 +36,9 @@ from .synthetic import EEGRecording
 #: The gamma band tops out at 45 Hz, so a meaningful recording needs at least 100 Hz.
 MIN_SFREQ = 100.0
 MAX_SFREQ = 2_000.0
-MAX_CHANNELS = 32
+# BrainVis uses the 128-channel EEG-Image montage. Keep the public parser able to
+# accept that array while still bounding the total sample budget below.
+MAX_CHANNELS = 128
 MAX_SAMPLES_PER_CHANNEL = 600_000
 MAX_TOTAL_SAMPLES = 3_000_000
 

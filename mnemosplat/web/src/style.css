@@ -855,6 +855,90 @@ img { display: block; max-width: 100%; }
 .eeg-help strong { color: var(--muted); font-weight: 550; }
 .eeg-help .mono { font-size: 0.94em; color: var(--muted); }
 
+.eeg-modes {
+  display: flex;
+  gap: 6px;
+  margin: 0 0 10px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 11px;
+  background: rgba(255, 255, 255, 0.025);
+}
+.eeg-mode {
+  flex: 1;
+  min-width: 0;
+  padding: 8px 9px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 11px;
+  letter-spacing: 0.01em;
+  transition: background 0.18s ease, color 0.18s ease;
+}
+.eeg-mode:hover { color: var(--text); background: rgba(255, 255, 255, 0.05); }
+.eeg-mode.is-active {
+  color: #16120b;
+  background: var(--amber);
+  font-weight: 600;
+}
+.eeg-mode .mono {
+  display: inline-block;
+  margin-left: 3px;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  opacity: 0.72;
+}
+.eeg-mode.is-active .mono { opacity: 0.76; }
+.eeg-mode:disabled { opacity: 0.4; cursor: not-allowed; }
+.eeg-mode-help {
+  margin: 0 0 14px;
+  font-size: 10.5px;
+  line-height: 1.6;
+  color: var(--faint);
+}
+.eeg-mode-help strong { color: var(--muted); font-weight: 550; }
+.eeg-mode-help.is-warn { color: #eca9a0; }
+
+.recon-card { width: min(760px, 100%); }
+.recon-meta {
+  margin: 0 0 16px;
+  font-size: 9px;
+  line-height: 1.7;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+.recon-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 0 0 18px;
+}
+.recon-grid figure { margin: 0; }
+.recon-grid button {
+  display: block;
+  width: 100%;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #050608;
+  overflow: hidden;
+}
+.recon-grid img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+.recon-grid figcaption {
+  margin-top: 7px;
+  font-family: var(--mono);
+  font-size: 8.5px;
+  line-height: 1.5;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--faint);
+}
+@media (max-width: 720px) {
+  .recon-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+
 .eeg-progress {
   height: 3px;
   margin: 2px 0 9px;

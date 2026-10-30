@@ -37,6 +37,8 @@ const state = {
   seenFrames: new Set(),
   uploadFile: null,
   uploading: false,
+  eegMode: 'condition',
+  health: null,
 };
 
 let stage = null;
@@ -68,6 +70,11 @@ const dom = {
   eegStatus: $('#eeg-status'),
   eegProgress: $('#eeg-progress'),
   eegProgressFill: $('#eeg-progress-fill'),
+  eegModes: $('#eeg-modes'),
+  eegModeHelp: $('#eeg-mode-help'),
+  reconModal: $('#recon-modal'),
+  reconGrid: $('#recon-grid'),
+  reconMeta: $('#recon-meta'),
   lightbox: $('#lightbox'),
   lightboxImg: $('#lightbox-img'),
   lightboxCap: $('#lightbox-cap'),
@@ -223,6 +230,7 @@ async function boot() {
   const key = pickInitialKey(index);
   const wantedFrame = Number(new URLSearchParams(location.search).get('frame'));
   if (Number.isFinite(wantedFrame) && wantedFrame > 0) state.frame = wantedFrame;
+  refreshHealth();
 
   dom.bootStatus.textContent = 'reading narration and neural telemetry…';
   try {
@@ -633,6 +641,88 @@ function closeLightbox() {
   dom.lightboxImg.removeAttribute('src');
 }
 
+/* --------------------------------------------------- reconstruction status */
+function reconInfo() {
+  return state.health?.reconstruction || null;
+}
+
+function reconUsable() {
+  const info = reconInfo();
+  return Boolean(info?.configured && info?.ready && info?.enabled);
+}
+
+async function refreshHealth() {
+  try {
+    state.health = await fetchJSON('/api/health');
+  } catch {
+    state.health = null;
+  }
+  updateEEGModes();
+}
+
+function updateEEGModes() {
+  const info = reconInfo();
+  const usable = reconUsable();
+  for (const button of dom.eegModes?.querySelectorAll('[data-eeg-mode]') || []) {
+    const mode = button.dataset.eegMode;
+    button.classList.toggle('is-active', mode === state.eegMode);
+    if (mode === 'reconstruct') {
+      button.title = usable
+        ? 'Experimental BrainVis static-frame reconstruction on an external GPU'
+        : (info?.reason || 'GPU reconstruction is not configured');
+    }
+  }
+
+  if (state.eegMode === 'reconstruct') {
+    let message = '';
+    let warn = false;
+    if (!info?.configured) {
+      message = 'No BrainVis GPU worker is configured. The CPU demo cannot run Stable Diffusion.';
+      warn = true;
+    } else if (!info?.enabled) {
+      message = 'GPU reconstruction is disabled on this public deployment. Set an admin token or run locally.';
+      warn = true;
+    } else if (!info?.ready) {
+      message = `GPU worker is not ready: ${info?.reason || 'checkpoint or CUDA missing'}`;
+      warn = true;
+    } else {
+      message = 'Ready. Uses 128-channel EEG in BrainVis training order; returns independent static frames, not video.';
+    }
+    dom.eegModeHelp.innerHTML = esc(message);
+    dom.eegModeHelp.classList.toggle('is-warn', warn);
+  } else {
+    dom.eegModeHelp.innerHTML = '<strong>Condition</strong> re-lifts the same baked scene. EEG changes only density, opacity and spread — never RGB pixels. This is the controlled demo.';
+    dom.eegModeHelp.classList.remove('is-warn');
+  }
+  updateEEGSubmit();
+}
+
+function setEEGMode(mode) {
+  if (mode !== 'condition' && mode !== 'reconstruct') return;
+  state.eegMode = mode;
+  updateEEGModes();
+  if (state.eegMode === 'reconstruct') {
+    setEEGStatus(
+      reconUsable()
+        ? 'Ready. Upload 128 channels; the GPU worker will generate static frames.'
+        : 'Reconstruction is unavailable. See the status above.',
+      reconUsable() ? 'is-ok' : 'is-error',
+    );
+  } else {
+    setEEGStatus('Choose a recording to begin.');
+  }
+}
+
+function updateEEGSubmit() {
+  if (!dom.eegSubmit) return;
+  const canRun = state.eegMode === 'condition' || reconUsable();
+  dom.eegSubmit.disabled = Boolean(state.uploading || !state.uploadFile || !canRun);
+  if (state.uploading) return;
+  dom.eegSubmit.textContent = state.eegMode === 'reconstruct'
+    ? 'Reconstruct frames'
+    : 'Condition volume';
+}
+
 /* --------------------------------------------------------------- EEG upload */
 const EEG_MAX_BYTES = 12 * 1024 * 1024;
 const EEG_EXTENSIONS = new Set(['csv', 'tsv', 'txt', 'npy']);
@@ -665,14 +755,16 @@ function clearEEGSelection() {
 function resetEEGForm() {
   clearEEGSelection();
   dom.eegSfreq.value = '250';
-  dom.eegSubmit.textContent = 'Condition volume';
   setEEGProgress(0);
   setEEGStatus('Choose a recording to begin.');
+  updateEEGModes();
 }
 
 function openEEGModal() {
   closeModal();
   dom.eegModal.hidden = false;
+  refreshHealth();
+  updateEEGModes();
   setTimeout(() => dom.eegDrop.focus(), 0);
 }
 
@@ -710,12 +802,22 @@ function setEEGFile(file) {
   dom.eegDrop.classList.add('is-set');
   dom.eegDropTitle.textContent = file.name;
   dom.eegDropHint.textContent = `${formatBytes(file.size)} · ${extension.toUpperCase()} · click to replace`;
-  dom.eegSubmit.disabled = false;
   setEEGProgress(0);
-  setEEGStatus('Ready. The baked keyframe and depth map will be reused.', 'is-ok');
+  if (state.eegMode === 'reconstruct') {
+    const info = reconInfo();
+    setEEGStatus(
+      reconUsable()
+        ? `Ready. ${info?.channels_required || 128} channels required; frames are independent, not video.`
+        : 'Reconstruction is unavailable. Switch to condition mode or configure the GPU worker.',
+      reconUsable() ? 'is-ok' : 'is-error',
+    );
+  } else {
+    setEEGStatus('Ready. The baked keyframe and depth map will be reused.', 'is-ok');
+  }
+  updateEEGSubmit();
 }
 
-function uploadEEGFile(file, sfreq, onProgress) {
+function uploadEEGFile(file, sfreq, mode, onProgress) {
   return new Promise((resolve, reject) => {
     const xhr = new XMLHttpRequest();
     xhr.open('POST', '/api/eeg');
@@ -748,13 +850,14 @@ function uploadEEGFile(file, sfreq, onProgress) {
     const form = new FormData();
     form.append('file', file, file.name);
     form.append('sfreq', String(sfreq));
+    form.append('mode', mode);
     xhr.send(form);
   });
 }
 
 async function pollEEGJob(jobId) {
   const started = Date.now();
-  const timeout = 8 * 60 * 1000;
+  const timeout = 20 * 60 * 1000;
   let failures = 0;
   while (Date.now() - started < timeout) {
     let job;
@@ -787,6 +890,40 @@ async function pollEEGJob(jobId) {
     'The re-lift is taking longer than expected. The free instance may be busy; '
     + 'try a shorter recording or check the service logs.',
   );
+}
+
+function completeReconstruction(job) {
+  const images = Array.isArray(job.images) ? job.images : [];
+  if (!images.length) throw new Error('The GPU worker returned no frames.');
+
+  dom.reconGrid.innerHTML = images.map((image, index) => {
+    const caption = [
+      `frame ${String(index + 1).padStart(2, '0')}`,
+      image.label ? esc(image.label) : 'unclassified',
+      image.predicted_class != null ? `class ${esc(image.predicted_class)}` : '',
+    ].filter(Boolean).join(' · ');
+    return `
+      <figure>
+        <button type="button" data-recon-src="${esc(asset(image.url))}" data-recon-cap="${caption}">
+          <img src="${esc(asset(image.url))}" alt="${caption}" loading="lazy" />
+        </button>
+        <figcaption>${caption}</figcaption>
+      </figure>`;
+  }).join('');
+
+  const meta = job.meta || {};
+  dom.reconMeta.textContent = [
+    `${images.length} static frames`,
+    meta.window_s ? `${meta.window_s}s windows` : '',
+    job.filename ? String(job.filename) : '',
+    job.elapsed_s ? `${Number(job.elapsed_s).toFixed(1)}s GPU` : '',
+  ].filter(Boolean).join(' · ');
+
+  dom.reconModal.hidden = false;
+  state.uploading = false;
+  resetEEGForm();
+  dom.eegModal.hidden = true;
+  toast(`Experimental reconstruction ready · ${images.length} static frames`, 7000);
 }
 
 async function completeEEGUpload(job) {
@@ -825,6 +962,11 @@ async function completeEEGUpload(job) {
 
 async function submitEEG() {
   if (state.uploading || !state.uploadFile) return;
+  const mode = state.eegMode;
+  if (mode === 'reconstruct' && !reconUsable()) {
+    setEEGStatus('Experimental reconstruction is not available on this deployment.', 'is-error');
+    return;
+  }
   const sfreq = Number(dom.eegSfreq.value);
   if (!Number.isFinite(sfreq) || sfreq < 100 || sfreq > 2000) {
     setEEGStatus('Enter a sampling rate between 100 and 2000 Hz.', 'is-error');
@@ -832,33 +974,40 @@ async function submitEEG() {
   }
 
   state.uploading = true;
-  dom.eegSubmit.disabled = true;
+  updateEEGSubmit();
   dom.eegSubmit.textContent = 'Uploading…';
   setEEGProgress(2);
-  setEEGStatus('Uploading the recording…', 'is-busy');
+  setEEGStatus(
+    mode === 'reconstruct'
+      ? 'Uploading the recording for GPU reconstruction…'
+      : 'Uploading the recording…',
+    'is-busy',
+  );
   setBusy(true);
 
   try {
-    const queued = await uploadEEGFile(state.uploadFile, sfreq, (percent) => {
+    const queued = await uploadEEGFile(state.uploadFile, sfreq, mode, (percent) => {
       setEEGProgress(2 + percent * 0.2);
       setEEGStatus(`Uploading the recording · ${Math.round(percent)}%`, 'is-busy');
     });
     setEEGProgress(25);
-    setEEGStatus('Queued. Analysing posterior EEG bands…', 'is-busy');
+    setEEGStatus(
+      mode === 'reconstruct'
+        ? 'Queued. The external GPU worker is loading the BrainVis cascade…'
+        : 'Queued. Analysing posterior EEG bands…',
+      'is-busy',
+    );
     const done = await pollEEGJob(queued.job);
-    await completeEEGUpload(done);
+    if (mode === 'reconstruct') completeReconstruction(done);
+    else await completeEEGUpload(done);
   } catch (error) {
     state.uploading = false;
-    dom.eegSubmit.disabled = !state.uploadFile;
-    dom.eegSubmit.textContent = 'Condition volume';
+    updateEEGSubmit();
     setEEGProgress(0);
     setEEGStatus(error?.message || String(error), 'is-error');
   } finally {
     setBusy(false);
-    if (!state.uploading) {
-      dom.eegSubmit.disabled = !state.uploadFile;
-      dom.eegSubmit.textContent = 'Condition volume';
-    }
+    if (!state.uploading) updateEEGSubmit();
   }
 }
 
@@ -878,6 +1027,15 @@ function bind() {
   dom.eegBtn.addEventListener('click', openEEGModal);
   dom.eegModal.addEventListener('click', (event) => {
     if (event.target.closest('[data-eeg-close]')) closeEEGModal();
+  });
+  dom.eegModes?.addEventListener('click', (event) => {
+    const button = event.target.closest('[data-eeg-mode]');
+    if (button && !button.disabled) setEEGMode(button.dataset.eegMode);
+  });
+  dom.reconModal?.addEventListener('click', (event) => {
+    if (event.target.closest('[data-recon-close]')) dom.reconModal.hidden = true;
+    const image = event.target.closest('[data-recon-src]');
+    if (image) openLightbox(image.dataset.reconSrc, image.dataset.reconCap);
   });
   dom.eegDrop.addEventListener('click', () => dom.eegFile.click());
   dom.eegDrop.addEventListener('keydown', (event) => {
@@ -932,6 +1090,10 @@ function bind() {
 
     if (!dom.lightbox.hidden) {
       if (event.key === 'Escape') closeLightbox();
+      return;
+    }
+    if (!dom.reconModal.hidden) {
+      if (event.key === 'Escape') dom.reconModal.hidden = true;
       return;
     }
     if (!dom.eegModal.hidden) {

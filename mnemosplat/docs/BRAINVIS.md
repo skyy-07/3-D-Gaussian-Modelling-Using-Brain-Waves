@@ -11,8 +11,14 @@ raw posterior EEG ──► BrainVis freq encoder + time encoder ──► CLIP-
                                                      per-entity salience weights
 ```
 
-It does **not** use BrainVis to generate RGB. That restriction is the scientific point of
-the project, not an implementation shortcut. See [SCIENCE.md](SCIENCE.md).
+It does **not** use BrainVis to generate RGB in the controlled demo. That restriction is
+the scientific point of the project, not an implementation shortcut. See
+[SCIENCE.md](SCIENCE.md).
+
+> **Separate experimental branch.** [RECONSTRUCTION.md](RECONSTRUCTION.md) documents the
+> optional GPU-only branch that calls BrainVis' image cascade on a 128-channel recording
+> and returns static frames. It is disabled by default, does not affect the fixed-scene
+> demo, and is not a video decoder.
 
 The default demo runs on `SpectralSalienceEncoder` (Welch PSD + calibration), which needs
 no weights, no GPU and no checkpoint. This document describes how the learned branch

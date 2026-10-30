@@ -230,3 +230,117 @@ def test_recorded_eeg_is_rate_limited(eeg_env, monkeypatch):
     assert first.status_code == 400
     assert second.status_code == 429
     assert "Too many" in second.json()["detail"]
+
+
+# --------------------------------------------------------------------------- #
+# experimental BrainVis reconstruction branch
+# --------------------------------------------------------------------------- #
+from mns.reconstruct import ReconFrame, ReconResult, WorkerStatus  # noqa: E402
+
+
+def _npy(seconds: float = 2.0, sfreq: float = 250.0, channels: int = 128) -> bytes:
+    signal = np.zeros((channels, int(seconds * sfreq)), dtype=np.float32)
+    for c in range(channels):
+        signal[c] = np.sin(2 * np.pi * (8.0 + c * 0.1) * np.arange(signal.shape[1]) / sfreq)
+    import io
+
+    buf = io.BytesIO()
+    np.save(buf, signal)
+    return buf.getvalue()
+
+
+class _FakeReconstructClient:
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reconstruct(self, signal, sfreq, channels, *, seed=None):
+        raise AssertionError("this fake is replaced by the test")
+
+
+def test_public_demo_blocks_reconstruction_before_upload(eeg_env):
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("memory.npy", _npy(), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250"},
+        )
+    assert response.status_code == 403
+    assert "disabled" in response.json()["detail"]
+
+
+def test_reconstruction_without_a_worker_returns_503(eeg_env, monkeypatch):
+    monkeypatch.setattr(api, "PUBLIC_DEMO", False)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "")
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("memory.npy", _npy(), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250"},
+        )
+    assert response.status_code == 503
+    assert "MNS_BRAINVIS_WORKER_URL" in response.json()["detail"]
+
+
+def test_reconstruction_requires_the_128_channel_montage(eeg_env, monkeypatch):
+    monkeypatch.setattr(api, "PUBLIC_DEMO", False)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "http://gpu.local")
+    monkeypatch.setattr(
+        api,
+        "_reconstruct_status",
+        lambda force=False: WorkerStatus(configured=True, ready=True, reason="ready"),
+    )
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("memory.npy", _npy(channels=4), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250"},
+        )
+    assert response.status_code == 400
+    assert "128" in response.json()["detail"]
+
+
+def test_reconstruction_job_writes_static_frames(eeg_env, monkeypatch):
+    monkeypatch.setattr(api, "PUBLIC_DEMO", False)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "http://gpu.local")
+    monkeypatch.setattr(
+        api,
+        "_reconstruct_status",
+        lambda force=False: WorkerStatus(configured=True, ready=True, reason="ready"),
+    )
+    fake = _FakeReconstructClient()
+
+    # Return a valid tiny PNG from the fake worker.
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 140, 60)).save(out, format="PNG")
+    png = out.getvalue()
+
+    def fake_reconstruct(signal, sfreq, channels, *, seed=None):
+        fake.calls += 1
+        return ReconResult(frames=[ReconFrame(index=0, png=png, label="test")])
+
+    fake.reconstruct = fake_reconstruct  # type: ignore[method-assign]
+    monkeypatch.setattr(api, "_reconstruct_client", lambda: fake)
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("memory.npy", _npy(), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250", "seed": "7"},
+        )
+        assert response.status_code == 202, response.text
+        payload = response.json()
+        assert payload["kind"] == "reconstruct"
+        job = client.get(f"/api/eeg/jobs/{payload['job']}").json()
+        assert job["state"] == "done", job
+        assert job["meta"]["engine"] == "brainvis"
+        assert len(job["images"]) == 1
+        path = eeg_env / job["images"][0]["url"]
+        assert path.exists()
+        assert Image.open(path).size == (8, 8)
+    assert fake.calls == 1

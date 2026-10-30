@@ -4,8 +4,13 @@
 whose density is conditioned by posterior EEG, with a paired control that a judge can
 inspect in under two minutes.
 
-**Non-goals:** decoding images from EEG, clinical claims, multi-view reconstruction,
-photorealism on CPU, live EEG hardware, a production multi-tenant service.
+**Non-goals:** decoding images from EEG in the controlled demo, clinical claims,
+multi-view reconstruction, photorealism on CPU, live EEG hardware, a production
+multi-tenant service.
+
+> The optional GPU-only BrainVis static-frame branch is documented separately in
+> [RECONSTRUCTION.md](RECONSTRUCTION.md). It is not part of the 36-hour controlled demo
+> and does not claim video or memory reconstruction.
 
 The plan below is ordered by demo risk, not by elegance. Every phase ends in something
 that can be shown even if the next phase fails. The final section records what actually

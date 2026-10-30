@@ -36,6 +36,7 @@ posterior EEG ──► Welch PSD ──► salience + attention field M(u,v) �
 | Meta Model API (Muse Spark / Muse Image / SAM 3.1 / Muse Voice) | Implemented, **not executed here** — no `MODEL_API_KEY` |
 | Depth-Anything-V2 on CPU/GPU | Optional; `torch`/`transformers` not installed in this venv |
 | BrainVis learned salience encoder | Interface + artifact check shipped; checkpoints are request-only |
+| Experimental BrainVis reconstruction | Separate GPU-only branch + static-frame UI; **disabled without checkpoint/worker**. Not video. |
 | EEG | **Synthetic** comparison pair; public **recorded CSV/NPY upload** is labelled `recorded EEG` |
 | Clinical / PTSD claims | Not made. This is a systems prototype, not a diagnostic |
 
@@ -316,6 +317,7 @@ mnemosplat/
     pipeline.py    orchestration, paired conditions, cache
     api.py         FastAPI jobs + static hosting
   web/             Vite + three.js + GaussianSplats3D HUD/WebXR client
+  services/        optional CUDA worker for the experimental BrainVis branch
   tests/           PSD, attention, geometry, formats, director, pipeline, API
   docs/            architecture, science, Meta integration, BrainVis, deployment
   Dockerfile       Node build → Python runtime; bakes offline demo assets
@@ -343,6 +345,10 @@ mnemosplat/
 | `MNS_ALLOW_ORIGINS` | `*` | Comma-separated CORS origins |
 | `MNS_LOG` | `INFO` | Log level |
 | `BRAINVIS_ROOT` | unset | BrainVis checkout for `doctor` |
+| `MNS_BRAINVIS_WORKER_URL` | unset | External CUDA worker for experimental reconstruction |
+| `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the worker |
+| `MNS_RECON_MAX_FRAMES` | `4` | Max static frames per reconstruction upload |
+| `MNS_BRAINVIS_TIMEOUT_S` | `900` | Reconstruction request timeout |
 
 ---
 
@@ -387,6 +393,8 @@ a minute on the build laptop without a GPU; Muse Image adds a network round trip
 - [Science](docs/SCIENCE.md) — hypothesis, features, calibration, leakage argument,
   PTSD framing, validation protocol.
 - [BrainVis](docs/BRAINVIS.md) — how the learned salience branch plugs in.
+- [Experimental reconstruction](docs/RECONSTRUCTION.md) — the GPU-only BrainVis
+  static-frame branch, its limitations, and why Render's free tier cannot host it.
 - [Deploy on Render](docs/DEPLOY_RENDER.md) — Docker image, blueprint, public-demo
   guard, verification, cold starts, and troubleshooting.
 
