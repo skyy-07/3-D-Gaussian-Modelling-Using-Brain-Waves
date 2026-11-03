@@ -152,3 +152,76 @@ def test_request_payload_contains_channel_metadata():
     )
     assert "channels" in seen["body"]
     assert json.dumps(["O1"] * 128) in seen["body"]
+
+
+def test_mirror_status_and_pipeline_are_decoded():
+    png = _png_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/health":
+            return httpx.Response(
+                200,
+                json={
+                    "status": "healthy",
+                    "service": "BrainVis EEG & Image Reconstruction API",
+                    "version": "1.0.0",
+                    "device": "cpu",
+                },
+            )
+        assert request.url.path == "/api/pipeline"
+        payload = json.loads(request.content)
+        assert len(payload["eeg_data"]) == 128
+        assert len(payload["eeg_data"][0]) == 440
+        return httpx.Response(
+            200,
+            json={
+                "analysis": {
+                    "predicted_stimulus": {
+                        "class_index": 8,
+                        "label": "panda",
+                        "category": "animal",
+                    }
+                },
+                "reconstruction": {
+                    "reconstructed_image_base64": (
+                        "data:image/png;base64,"
+                        + base64.b64encode(png).decode("ascii")
+                    ),
+                    "engine": "built-in-neural-synth",
+                    "prompt": "reconstructed panda (animal)",
+                },
+            },
+        )
+
+    from mns.reconstruct import BrainVisMirrorClient
+
+    client = BrainVisMirrorClient(
+        "http://mirror.local",
+        transport=httpx.MockTransport(handler),
+    )
+    status = client.status()
+    assert status.ready is True
+    assert status.backend == "brainvis-mirror"
+    assert status.checkpoint is None
+
+    result = client.reconstruct(
+        np.zeros((1, 128, 110), dtype=np.float32),
+        250.0,
+        [f"ch{i}" for i in range(128)],
+    )
+    assert len(result.frames) == 1
+    assert result.frames[0].label == "panda"
+    assert result.frames[0].predicted_class == 8
+    assert result.frames[0].png == png
+    assert result.meta["provider"] == "brainvis-mirror"
+    assert "not the trained" in result.meta["note"]
+
+
+def test_provider_factory_selects_mirror(monkeypatch):
+    monkeypatch.setenv("MNS_RECON_PROVIDER", "mirror")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "http://mirror.local")
+    from mns.reconstruct import make_reconstruction_client
+
+    client = make_reconstruction_client()
+    assert client.provider == "mirror"
+    assert client.url == "http://mirror.local"

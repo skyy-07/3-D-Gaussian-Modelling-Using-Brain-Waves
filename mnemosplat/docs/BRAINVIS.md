@@ -16,9 +16,10 @@ the scientific point of the project, not an implementation shortcut. See
 [SCIENCE.md](SCIENCE.md).
 
 > **Separate experimental branch.** [RECONSTRUCTION.md](RECONSTRUCTION.md) documents the
-> optional GPU-only branch that calls BrainVis' image cascade on a 128-channel recording
-> and returns static frames. It is disabled by default, does not affect the fixed-scene
-> demo, and is not a video decoder.
+> native GPU branch that calls BrainVis' image cascade on a 128-channel recording and
+> returns static frames, plus the lightweight CPU mirror used by the live demo. Neither
+> affects the fixed-scene control, and neither is a video decoder. The mirror is
+> explicitly labelled synthetic and is not the authors' checkpoint.
 
 The default demo runs on `SpectralSalienceEncoder` (Welch PSD + calibration), which needs
 no weights, no GPU and no checkpoint. This document describes how the learned branch

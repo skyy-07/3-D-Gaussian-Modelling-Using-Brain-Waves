@@ -54,7 +54,7 @@ from .eeg import (
 )
 from .eeg.brainvis import resolve_brainvis
 from .pipeline import PipelineConfig, run_episode, run_pair, selftest
-from .reconstruct import BrainVisClient, WorkerStatus
+from .reconstruct import WorkerStatus, make_reconstruction_client
 from .scenarios import get_scenario, list_scenarios
 from .schemas import Manifest
 from .util import configure_logging, read_json, write_json
@@ -102,6 +102,12 @@ RECON_WINDOW_S = 0.44  # BrainVis EEG-Image trials: 440 samples at 1 kHz
 RECON_CHANNELS = 128  # EEG-Image montage; order must match the checkpoint
 RECON_STATUS_TTL_S = max(2, _env_int("MNS_RECON_STATUS_TTL_S", 20))
 RECON_MIN_FRAMES = 1
+RECON_PUBLIC = os.environ.get("MNS_RECON_PUBLIC", "").strip().lower() in {
+    "1",
+    "true",
+    "yes",
+    "on",
+}
 
 
 @asynccontextmanager
@@ -220,19 +226,25 @@ _recon_status_lock = threading.Lock()
 _recon_status_cache: dict = {"at": 0.0, "value": None}
 
 
-def _reconstruct_client() -> BrainVisClient:
-    return BrainVisClient.from_env()
+def _reconstruct_client():
+    return make_reconstruction_client()
 
 
 def _reconstruct_enabled() -> bool:
-    """Whether this deployment is allowed to spend GPU time."""
-    return bool(_reconstruct_client().configured) and (
-        (not PUBLIC_DEMO) or bool(ADMIN_TOKEN)
-    )
+    """Whether this deployment is allowed to spend reconstruction resources."""
+    client = _reconstruct_client()
+    if not client.configured:
+        return False
+    # The lightweight mirror is CPU-only and free to run, so an operator can opt in
+    # to a public demo with MNS_RECON_PUBLIC=1. The native CUDA worker stays
+    # admin-gated on public deployments.
+    if getattr(client, "provider", "worker") == "mirror" and RECON_PUBLIC:
+        return True
+    return (not PUBLIC_DEMO) or bool(ADMIN_TOKEN)
 
 
 def _reconstruct_status(force: bool = False) -> WorkerStatus:
-    """Probe the GPU worker, with a short cache so /api/health stays cheap."""
+    """Probe the reconstruction provider, with a short cache for /api/health."""
     client = _reconstruct_client()
     if not client.configured:
         return client.status()
@@ -630,7 +642,7 @@ def _reconstruct_runner(
     info: dict,
     n_frames: int,
 ) -> None:
-    """Send EEG windows to the GPU worker and store static reconstruction frames."""
+    """Send EEG windows to the configured provider and store static frames."""
     job = _eeg_jobs.get(job_id)
     if job is None:
         return
@@ -641,7 +653,7 @@ def _reconstruct_runner(
             state="running",
             stage="reconstructing",
             progress=0.1,
-            message="Sending EEG windows to the BrainVis GPU worker…",
+            message="Sending EEG windows to the reconstruction provider…",
             started=started,
             target=str(target),
         )
@@ -655,8 +667,15 @@ def _reconstruct_runner(
             job.update(
                 progress=0.25,
                 message=(
-                    f"BrainVis · {len(windows)} independent windows · "
-                    "cascade diffusion (this can take minutes)…"
+                    (
+                        f"Lightweight mirror · {len(windows)} independent windows · "
+                        "synthetic static frames…"
+                    )
+                    if getattr(client, "provider", "worker") == "mirror"
+                    else (
+                        f"BrainVis · {len(windows)} independent windows · "
+                        "cascade diffusion (this can take minutes)…"
+                    )
                 ),
             )
         result = client.reconstruct(
@@ -685,16 +704,26 @@ def _reconstruct_runner(
                 }
             )
         if not images:
-            raise RuntimeError("the GPU worker returned no frames")
+            raise RuntimeError("the reconstruction provider returned no frames")
         meta = {
             **result.meta,
-            "engine": "brainvis",
+            "engine": str(result.meta.get("engine") or "brainvis"),
+            "provider": str(
+                result.meta.get("provider")
+                or getattr(client, "provider", "worker")
+            ),
             "kind": "experimental_static_reconstruction",
             "window_s": RECON_WINDOW_S,
+            "provider_window_s": result.meta.get("window_s"),
             "frames": len(images),
             "sfreq": round(float(recording.sfreq), 2),
             "channels": len(recording.channels),
         }
+        meta.setdefault(
+            "note",
+            "Experimental static frames from the configured reconstruction provider; "
+            "not a video and not a memory.",
+        )
         write_json(
             target / "reconstruction.json",
             {
@@ -753,9 +782,16 @@ def health() -> dict:
             "window_s": RECON_WINDOW_S,
             "channels_required": RECON_CHANNELS,
             "note": (
-                "Experimental BrainVis static-image branch. The CPU web service only "
-                "proxies to an external CUDA worker; it cannot run Stable Diffusion "
-                "on the Render free plan. Frames are independent, not video."
+                "Lightweight BrainVis-compatible mirror: synthetic class/image "
+                "generation, not the authors' checkpoint. Frames are independent, "
+                "not video."
+                if recon.backend == "brainvis-mirror"
+                else (
+                    "Experimental BrainVis static-image branch. The CPU web service "
+                    "only proxies to an external CUDA worker; it cannot run Stable "
+                    "Diffusion on the Render free plan. Frames are independent, not "
+                    "video."
+                )
             ),
         }
     )
@@ -959,7 +995,7 @@ async def upload_eeg(
             "state": "queued",
             "stage": "queued",
             "progress": 0.0,
-            "message": "Queued for the experimental BrainVis GPU worker.",
+            "message": "Queued for the configured reconstruction provider.",
             "created": time.time(),
             "filename": filename,
             "sfreq": info["sfreq"],

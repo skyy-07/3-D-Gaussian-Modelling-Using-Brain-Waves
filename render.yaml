@@ -42,12 +42,19 @@ services:
       - key: MNS_ADMIN_TOKEN
         sync: false
 
-      # Optional experimental BrainVis branch. This free CPU service cannot run
-      # BrainVis/SD1.5; these values must point at a separate CUDA worker. Leave
-      # unset to keep the reconstruction route disabled.
+      # Experimental reconstruction branch. This free CPU service cannot run
+      # BrainVis/SD1.5 itself. It proxies to the lightweight CPU mirror below.
+      # That mirror is synthetic (not the authors' checkpoint); set
+      # MNS_RECON_PROVIDER=worker and point at a CUDA worker for the real model.
       - key: MNS_BRAINVIS_WORKER_URL
-        sync: false
+        value: https://brainvis-api.onrender.com
+      - key: MNS_RECON_PROVIDER
+        value: mirror
+      - key: MNS_RECON_PUBLIC
+        value: "1"
       - key: MNS_BRAINVIS_WORKER_TOKEN
         sync: false
       - key: MNS_RECON_MAX_FRAMES
         value: "4"
+      - key: MNS_BRAINVIS_TIMEOUT_S
+        value: "900"

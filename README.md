@@ -16,6 +16,11 @@ The baked comparison conditions use synthetic EEG, labelled as such. Uploaded
 recordings are labelled recorded EEG. This is a systems prototype, not a diagnostic or
 a clinical claim.
 
+The optional reconstruction tab uses a lightweight CPU mirror of BrainVis
+([`skyy-07/BrainVis`](https://github.com/skyy-07/BrainVis)) so the endpoint is usable
+without a GPU. That mirror is **synthetic**, not the authors' trained checkpoint, and
+its frames are not video or memory evidence.
+
 ## Run it locally
 
 ```bash

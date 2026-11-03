@@ -344,3 +344,15 @@ def test_reconstruction_job_writes_static_frames(eeg_env, monkeypatch):
         assert path.exists()
         assert Image.open(path).size == (8, 8)
     assert fake.calls == 1
+
+
+def test_public_mirror_opt_in(monkeypatch):
+    class _Mirror:
+        configured = True
+        provider = "mirror"
+
+    monkeypatch.setattr(api, "_reconstruct_client", lambda: _Mirror())
+    monkeypatch.setattr(api, "PUBLIC_DEMO", True)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setattr(api, "RECON_PUBLIC", True)
+    assert api._reconstruct_enabled() is True

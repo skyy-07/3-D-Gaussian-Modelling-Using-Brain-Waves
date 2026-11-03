@@ -1,8 +1,10 @@
 # Experimental BrainVis reconstruction branch
 
-> **Status: experimental, GPU-only, and disabled by default.** This branch is separate
-> from the controlled 3D salience demo. It does **not** make the chair-and-mug scene
-> change, and it does **not** turn EEG into a faithful video of what someone watched.
+> **Status: experimental.** The native checkpoint path is GPU-only. The live demo uses
+> a lightweight CPU mirror, explicitly labelled as synthetic and **not** the authors'
+> checkpoint. This branch is separate from the controlled 3D salience demo. It does
+> **not** make the chair-and-mug scene change, and it does **not** turn EEG into a
+> faithful video of what someone watched.
 
 ## 1. Why the current demo always shows the chair and mug
 
@@ -102,23 +104,63 @@ returned PNGs.
 ### Cost and safety
 
 - GPU inference is slow (tens of seconds to minutes per window on a small GPU).
-- The public demo requires `MNS_ADMIN_TOKEN` for reconstruction. The existing public
-  recorded-EEG conditioning path remains CPU-only and token-free.
+- The native CUDA worker requires `MNS_ADMIN_TOKEN` on a public deployment. The
+  lightweight CPU mirror can be made public with `MNS_RECON_PUBLIC=1`; it is still
+  rate-limited by the normal upload guard.
+- The existing public recorded-EEG conditioning path remains CPU-only and token-free.
 - Do not present these frames as clinical evidence, a memory, or a faithful video
   reconstruction.
 
-## 6. Configuration
+## 6. Lightweight BrainVis-compatible mirror
+
+There is a second provider for people who do not have the authors' checkpoint:
+[`skyy-07/BrainVis`](https://github.com/skyy-07/BrainVis), deployed as a CPU service at
+<https://brainvis-api.onrender.com>.
+
+It is **not** the trained BrainVis model. The fork adds a lightweight FastAPI layer with:
+
+- `/api/pipeline` — EEG band analysis + a predicted class + an image;
+- `/api/upload-eeg` — the same pipeline from a file;
+- `/health` — a CPU service health check.
+
+Important limitations:
+
+- its `CPUFreqEncoder` is initialized with random weights; there is no trained
+  checkpoint;
+- its default image engine is a procedural canvas, not Stable Diffusion;
+- if the mirror operator sets `HF_API_TOKEN`, it may call a hosted text-to-image model
+  using the predicted class, which is an illustration, not EEG reconstruction;
+- its class probabilities are therefore not meaningful evidence about a stimulus.
+
+It is useful for testing the upload → job → gallery plumbing without a GPU, and the
+live deployment currently uses it so the reconstruction tab is not dead. The UI and
+API label it as a **lightweight mirror**, not as BrainVis checkpoint output.
+
+Use it with:
+
+```bash
+MNS_RECON_PROVIDER=mirror
+MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com
+MNS_RECON_PUBLIC=1          # opt in to public CPU-mirror use
+```
+
+To switch back to the real native worker, set `MNS_RECON_PROVIDER=worker`, point
+`MNS_BRAINVIS_WORKER_URL` at the CUDA worker, and set `MNS_ADMIN_TOKEN` if public.
+
+## 7. Configuration
 
 ### CPU app (Render/local)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MNS_BRAINVIS_WORKER_URL` | unset | Base URL of the CUDA worker, e.g. `https://gpu.example.net` |
-| `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the worker |
+| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker; `mirror` for the CPU mirror |
+| `MNS_BRAINVIS_WORKER_URL` | unset | Worker or mirror base URL |
+| `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Per-reconstruction HTTP timeout |
 | `MNS_RECON_MAX_FRAMES` | `4` | Maximum static frames per upload |
 | `MNS_RECON_STATUS_TTL_S` | `20` | Health-probe cache |
-| `MNS_ADMIN_TOKEN` | unset | Required to enable reconstruction on a public demo |
+| `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror on a public deployment |
+| `MNS_ADMIN_TOKEN` | unset | Required for the native worker on a public demo |
 
 ### GPU worker
 
@@ -133,20 +175,23 @@ The worker expects:
 | `MNS_BRAINVIS_WORKER_TOKEN` | Must match the CPU app token |
 | `MNS_BRAINVIS_DEVICE` | `cuda` (default) |
 
-## 7. Enabling it
+## 8. Enabling the native checkpoint path
 
 1. Obtain the BrainVis checkpoint from the authors.
 2. Put the BrainVis checkout, checkpoint and SD1.5 checkpoint on a CUDA machine.
 3. Start the worker and check `GET /health`; `ready` must be `true`.
-4. Set `MNS_BRAINVIS_WORKER_URL` and `MNS_BRAINVIS_WORKER_TOKEN` on the CPU app.
+4. Set `MNS_RECON_PROVIDER=worker`, `MNS_BRAINVIS_WORKER_URL` and
+   `MNS_BRAINVIS_WORKER_TOKEN` on the CPU app.
 5. Set `MNS_ADMIN_TOKEN` if the CPU app is public.
-6. Open the EEG dialog, choose **Reconstruct frames (GPU)**, and upload a 128-channel
+6. Open the EEG dialog, choose **Reconstruct frames**, and upload a 128-channel
    recording.
 
-Without the checkpoint, the worker reports `checkpoint: false` and the CPU app refuses
-the request. There is intentionally no random-weight or "make something up" fallback.
+Without the checkpoint, the native worker reports `checkpoint: false` and the CPU app
+refuses the request. There is intentionally no random-weight or "make something up"
+fallback in the native worker. The mirror is a separate, explicitly labelled demo
+provider.
 
-## 8. What would make this closer to video
+## 9. What would make this closer to video
 
 BrainVis alone is not enough. A real video path would need:
 

@@ -270,10 +270,11 @@ adb reverse tcp:8000 tcp:8000
 - The image build is separate from the runtime instance and may take longer than a
   request. Watch the deploy log if the health check initially fails.
 - Render terminates TLS and forwards `PORT`; the Dockerfile binds `0.0.0.0:${PORT}`.
-- **The free plan cannot run BrainVis or Stable Diffusion.** If
-  `MNS_BRAINVIS_WORKER_URL` is set, the CPU app only proxies to an external CUDA host.
-  With no worker it reports `reconstruction.configured=false`; with a worker it reports
-  readiness, but the public route still requires `MNS_ADMIN_TOKEN`. See
+- **The free plan cannot run BrainVis or Stable Diffusion.** It can proxy to an
+  external CUDA host, or to the lightweight CPU mirror. The current live demo sets
+  `MNS_RECON_PROVIDER=mirror`, `MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com`
+  and `MNS_RECON_PUBLIC=1`; that mirror is synthetic and not the authors' checkpoint.
+  The native worker path still requires `MNS_ADMIN_TOKEN` on a public deployment. See
   [RECONSTRUCTION.md](RECONSTRUCTION.md).
 
 ---
