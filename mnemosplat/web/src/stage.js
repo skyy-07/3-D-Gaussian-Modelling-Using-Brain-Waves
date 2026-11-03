@@ -151,13 +151,13 @@ export class SplatStage {
         // Escape the canvas stacking context so the pill sits with the HUD.
         const host = this.container.parentElement || document.body;
         if (button.parentElement !== host) host.appendChild(button);
-        if (button.tagName === 'BUTTON') button.setAttribute('aria-label', 'Enter virtual reality');
+        button.setAttribute('aria-label', 'Enter virtual reality');
 
         // Replace the library's developer-facing labels with demo-facing copy.
         const relabel = () => {
           const text = (button.textContent || '').trim();
-          if (/not supported|not allowed/i.test(text)) {
-            button.textContent = 'WebXR · headset required';
+          if (/not supported|not allowed|not available|unavailable/i.test(text)) {
+            button.textContent = 'WebXR · headset only';
             button.classList.add('is-unavailable');
             button.setAttribute('aria-disabled', 'true');
           } else if (/enter vr/i.test(text)) {
