@@ -88,7 +88,7 @@ img { display: block; max-width: 100%; }
   overflow: hidden;
   background:
     radial-gradient(900px 520px at 50% 30%, rgba(233, 178, 95, 0.08), transparent 65%),
-    linear-gradient(180deg, rgba(8, 9, 12, 0.96), rgba(8, 9, 12, 0.99));
+    #08090c;
 }
 .recon-stage[hidden] { display: none; }
 .recon-stage-head {
