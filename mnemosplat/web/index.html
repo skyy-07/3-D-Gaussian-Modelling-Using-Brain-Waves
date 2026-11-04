@@ -17,6 +17,23 @@
   <body>
     <div id="app">
       <div id="stage" aria-hidden="true"></div>
+
+      <section id="recon-stage" class="recon-stage" hidden aria-live="polite">
+        <div class="recon-stage-head">
+          <div class="recon-stage-copy">
+            <span id="recon-stage-kicker" class="eyebrow">Reconstruction output</span>
+            <h2 id="recon-stage-title">Static frames</h2>
+            <p id="recon-stage-note"></p>
+          </div>
+          <button id="recon-exit" class="recon-exit" type="button">Back to 3D scene</button>
+        </div>
+        <figure class="recon-hero">
+          <img id="recon-hero-img" alt="Reconstruction frame" />
+          <figcaption id="recon-hero-cap" class="mono"></figcaption>
+        </figure>
+        <div id="recon-strip" class="recon-strip" role="list" aria-label="Reconstruction frames"></div>
+      </section>
+
       <div class="grain" aria-hidden="true"></div>
       <div class="vignette" aria-hidden="true"></div>
 

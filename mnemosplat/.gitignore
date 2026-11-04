@@ -14,6 +14,7 @@ web/dist/
 
 # Generated demo assets and local runs
 out/
+.tmp/
 *.log
 
 # Local configuration and secrets

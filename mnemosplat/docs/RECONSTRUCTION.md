@@ -168,9 +168,11 @@ returns a fixed four-frame running-shoe flipbook with a visible watermark:
 - `NOT EEG RECONSTRUCTION`
 - `FIXED ILLUSTRATION · NOT A DECODED MEMORY`
 
-The API marks the job as `kind: scripted_demo_fixture`; the UI changes the modal
-heading and note so the frames cannot be mistaken for checkpoint output. This provider
-exists only to make the upload → job → gallery path repeatable for a video. Do not
+The API marks the job as `kind: scripted_demo_fixture`; the UI replaces the 3D volume
+with the frame viewer and changes the heading and note so the frames cannot be mistaken
+for checkpoint output. The viewer has a filmstrip, arrow-key navigation, and a **Back
+to 3D scene** button that restores the controlled chair-and-mug demo. This provider
+exists only to make the upload → job → frame-viewer path repeatable for a video. Do not
 present it as BrainVis, as a memory, or as evidence of what a subject saw.
 
 The deterministic EEG fixture used for the demo is generated with:

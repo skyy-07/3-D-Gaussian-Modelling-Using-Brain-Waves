@@ -76,6 +76,115 @@ img { display: block; max-width: 100%; }
 }
 #stage canvas { display: block; width: 100% !important; height: 100% !important; }
 
+/* Reconstruction output replaces the 3D volume on the main screen. */
+.recon-stage {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  padding: 96px 34px 26px;
+  overflow: hidden;
+  background:
+    radial-gradient(900px 520px at 50% 30%, rgba(233, 178, 95, 0.08), transparent 65%),
+    linear-gradient(180deg, rgba(8, 9, 12, 0.96), rgba(8, 9, 12, 0.99));
+}
+.recon-stage[hidden] { display: none; }
+.recon-stage-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 20px;
+}
+.recon-stage-copy { max-width: 760px; }
+.recon-stage-copy h2 {
+  margin: 6px 0 7px;
+  font-family: var(--serif);
+  font-size: clamp(28px, 4vw, 48px);
+  font-weight: 400;
+  line-height: 1.05;
+  letter-spacing: -0.02em;
+}
+.recon-stage-copy p {
+  margin: 0;
+  max-width: 720px;
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.6;
+}
+.recon-exit {
+  flex: 0 0 auto;
+  padding: 9px 14px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  background: var(--panel);
+  color: var(--text);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+.recon-exit:hover { border-color: var(--amber); color: var(--amber-bright); }
+.recon-hero {
+  flex: 1;
+  min-height: 0;
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+.recon-hero img {
+  width: auto;
+  height: auto;
+  max-width: min(100%, 760px);
+  max-height: min(calc(100% - 28px), 62vh);
+  object-fit: contain;
+  border: 1px solid var(--line-strong);
+  border-radius: 12px;
+  background: #050608;
+  box-shadow: var(--shadow);
+  cursor: zoom-in;
+}
+.recon-hero figcaption {
+  color: var(--faint);
+  font-size: 11px;
+  letter-spacing: 0.04em;
+}
+.recon-strip {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  overflow-x: auto;
+  padding: 4px 0 2px;
+}
+.recon-strip button {
+  flex: 0 0 auto;
+  width: 86px;
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: #050608;
+  opacity: 0.55;
+  transition: opacity 140ms ease, border-color 140ms ease, transform 140ms ease;
+}
+.recon-strip button:hover { opacity: 0.9; transform: translateY(-1px); }
+.recon-strip button.is-active {
+  opacity: 1;
+  border-color: var(--amber);
+  box-shadow: 0 0 0 1px var(--amber);
+}
+.recon-strip img { width: 100%; aspect-ratio: 1; object-fit: cover; }
+#app.is-recon #stage { visibility: hidden; }
+#app.is-recon .readout,
+#app.is-recon .story,
+#app.is-recon .dock,
+#app.is-recon .hint,
+#app.is-recon .mode { display: none; }
+
 .grain {
   position: absolute;
   inset: 0;
@@ -1294,12 +1403,21 @@ img { display: block; max-width: 100%; }
   .eeg-fields { grid-template-columns: 1fr 108px; }
   .mnemo-vr,
   #VRButton { display: none !important; }
+  .recon-stage { padding: 82px 16px 18px; gap: 12px; }
+  .recon-stage-head { flex-direction: column; gap: 10px; }
+  .recon-exit { align-self: flex-start; }
+  .recon-hero img { max-height: min(52vh, 520px); }
+  .recon-strip { justify-content: flex-start; }
+  .recon-strip button { width: 64px; }
 }
 
 @media (max-height: 720px) {
   .story { display: none; }
   .readout { max-height: calc(100dvh - 76px - 160px); }
   .evidence { display: none; }
+  .recon-stage { padding-top: 78px; gap: 10px; }
+  .recon-hero img { max-height: min(48vh, 440px); }
+  .recon-strip button { width: 58px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
