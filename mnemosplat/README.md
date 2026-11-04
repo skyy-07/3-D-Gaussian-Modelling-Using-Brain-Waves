@@ -356,8 +356,9 @@ mnemosplat/
 | `MNS_FIXTURE_LABEL` | `running shoe` | Label drawn on scripted fixture frames |
 | `MNS_RECON_MAX_FRAMES` | `4` | Max static frames per reconstruction upload |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Reconstruction request timeout |
-| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient mirror/worker failures |
-| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base delay for exponential retry backoff |
+| `MNS_BRAINVIS_RETRIES` | `4` | Retries for transient mirror/worker failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `5` | Base delay for exponential retry backoff |
+| `MNS_BRAINVIS_RETRY_BUDGET_S` | `120` | Total time budget for cold-start retries |
 
 The production Render blueprint uses `MNS_RECON_PROVIDER=mirror`,
 `MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com`, and

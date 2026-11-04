@@ -94,8 +94,9 @@ The image already sets sensible defaults. The blueprint also sets them explicitl
 | `MNS_BRAINVIS_WORKER_URL` | `https://brainvis-api.onrender.com` | BrainVis mirror or native worker base URL |
 | `MNS_RECON_PUBLIC` | `1` | Allow the public CPU mirror path |
 | `MNS_RECON_ALLOW_FIXTURE` | `0` | Must be `1` before `MNS_RECON_PROVIDER=fixture` is honored |
-| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient mirror/worker failures |
-| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base retry delay in seconds |
+| `MNS_BRAINVIS_RETRIES` | `4` | Retries for transient mirror/worker failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `5` | Base retry delay in seconds |
+| `MNS_BRAINVIS_RETRY_BUDGET_S` | `120` | Total cold-start retry budget in seconds |
 
 `PORT` is set by Render; do not override it. `MNS_OUT` and `MNS_WEB_DIST` matter because
 `pip install .` puts `mns` in `site-packages`; the Dockerfile's absolute paths make the

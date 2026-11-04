@@ -29,11 +29,14 @@ from .fixture import SCRIPTED_BACKEND, ScriptedFixtureClient
 log = logging.getLogger(__name__)
 
 DEFAULT_TIMEOUT_S = 900.0
+DEFAULT_MIRROR_TIMEOUT_S = 180.0
 DEFAULT_PROBE_TIMEOUT_S = 2.0
-DEFAULT_RETRIES = 2
-DEFAULT_RETRY_BACKOFF_S = 1.5
+DEFAULT_RETRIES = 4
+DEFAULT_RETRY_BACKOFF_S = 5.0
+DEFAULT_RETRY_BUDGET_S = 120.0
 MAX_RESPONSE_BYTES = 24 * 1024 * 1024
 TRANSIENT_STATUS = {408, 425, 429, 500, 502, 503, 504}
+COLD_START_STATUS = {502, 503, 504}
 MIRROR_BACKEND = "brainvis-mirror"
 _FIXTURE_GUARD_WARNED = False
 
@@ -107,11 +110,11 @@ def _retry_delay(attempt: int, response: httpx.Response | None = None) -> float:
         retry_after = response.headers.get("retry-after")
         if retry_after:
             try:
-                return max(0.0, float(retry_after))
+                return max(0.0, min(30.0, float(retry_after)))
             except ValueError:
                 pass
     backoff = max(0.0, _env_float("MNS_BRAINVIS_RETRY_BACKOFF_S", DEFAULT_RETRY_BACKOFF_S))
-    return backoff * (2**attempt)
+    return min(30.0, backoff * (2**attempt))
 
 
 def _post_with_retries(
@@ -123,17 +126,19 @@ def _post_with_retries(
 
     BrainVis mirror instances are often free-tier services that return 502/503 while
     waking up. Retrying those responses is safe because the pipeline request is
-    stateless. Non-transient 4xx responses are returned immediately for the caller to
-    surface as a configuration or input error.
+    stateless. The retry budget covers a typical Render cold start (~30-60s) without
+    letting a permanently unavailable endpoint hang the job forever.
     """
     attempts = max(0, _env_int("MNS_BRAINVIS_RETRIES", DEFAULT_RETRIES)) + 1
+    budget = max(0.0, _env_float("MNS_BRAINVIS_RETRY_BUDGET_S", DEFAULT_RETRY_BUDGET_S))
+    deadline = time.monotonic() + budget
     for attempt in range(attempts):
         try:
             response = client.post(url, **kwargs)
         except (httpx.TimeoutException, httpx.TransportError) as exc:
-            if attempt >= attempts - 1:
-                raise
             delay = _retry_delay(attempt)
+            if attempt >= attempts - 1 or time.monotonic() + delay > deadline:
+                raise
             log.warning(
                 "BrainVis request to %s failed (%s); retrying in %.1fs (%d/%d)",
                 url,
@@ -147,6 +152,8 @@ def _post_with_retries(
 
         if response.status_code in TRANSIENT_STATUS and attempt < attempts - 1:
             delay = _retry_delay(attempt, response)
+            if time.monotonic() + delay > deadline:
+                return response
             log.warning(
                 "BrainVis endpoint returned HTTP %s; retrying in %.1fs (%d/%d)",
                 response.status_code,
@@ -158,6 +165,19 @@ def _post_with_retries(
             continue
         return response
     raise AssertionError("retry loop exhausted without a response")
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """Return a concise upstream error, never a full HTML error page."""
+    detail = response.text[:600]
+    try:
+        parsed = response.json()
+        return str(parsed.get("detail") or parsed.get("error") or detail)
+    except Exception:  # noqa: BLE001
+        pass
+    if detail.lstrip().startswith("<"):
+        return f"upstream returned an HTML error page (HTTP {response.status_code})"
+    return detail
 
 
 def _check_response_size(response: httpx.Response, source: str) -> None:
@@ -306,12 +326,15 @@ class BrainVisClient:
             raise ReconstructError(f"BrainVis worker request failed: {exc}") from exc
 
         if response.status_code >= 400:
-            detail = response.text[:600]
-            try:
-                parsed = response.json()
-                detail = str(parsed.get("detail") or parsed.get("error") or detail)
-            except Exception:  # noqa: BLE001
-                pass
+            if (
+                response.status_code in COLD_START_STATUS
+                and response.text.lstrip().startswith("<")
+            ):
+                raise ReconstructError(
+                    "The BrainVis worker is waking up or temporarily unavailable "
+                    f"(HTTP {response.status_code}). Wait about 60 seconds and retry."
+                )
+            detail = _error_detail(response)
             raise ReconstructError(
                 f"BrainVis worker returned HTTP {response.status_code}: {detail}"
             )
@@ -384,7 +407,7 @@ class BrainVisMirrorClient:
         self,
         url: str,
         token: str = "",
-        timeout_s: float = DEFAULT_TIMEOUT_S,
+        timeout_s: float = DEFAULT_MIRROR_TIMEOUT_S,
         probe_timeout_s: float = DEFAULT_PROBE_TIMEOUT_S,
         transport: httpx.BaseTransport | None = None,
     ) -> None:
@@ -399,7 +422,9 @@ class BrainVisMirrorClient:
         return cls(
             url=os.environ.get("MNS_BRAINVIS_WORKER_URL", ""),
             token=os.environ.get("MNS_BRAINVIS_WORKER_TOKEN", ""),
-            timeout_s=_env_float("MNS_BRAINVIS_TIMEOUT_S", DEFAULT_TIMEOUT_S),
+            timeout_s=_env_float(
+                "MNS_BRAINVIS_MIRROR_TIMEOUT_S", DEFAULT_MIRROR_TIMEOUT_S
+            ),
         )
 
     @property
@@ -524,12 +549,17 @@ class BrainVisMirrorClient:
                         },
                     )
                     if response.status_code >= 400:
-                        detail = response.text[:600]
-                        try:
-                            parsed = response.json()
-                            detail = str(parsed.get("detail") or parsed.get("error") or detail)
-                        except Exception:  # noqa: BLE001
-                            pass
+                        if (
+                            response.status_code in COLD_START_STATUS
+                            and response.text.lstrip().startswith("<")
+                        ):
+                            raise ReconstructError(
+                                "The BrainVis mirror is waking up or temporarily "
+                                f"unavailable (Render HTTP {response.status_code}). "
+                                "Wait about 60 seconds and retry; the free-tier mirror "
+                                "sleeps when idle."
+                            )
+                        detail = _error_detail(response)
                         raise ReconstructError(
                             f"BrainVis mirror returned HTTP {response.status_code}: {detail}"
                         )

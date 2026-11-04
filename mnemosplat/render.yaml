@@ -64,6 +64,8 @@ services:
       - key: MNS_BRAINVIS_TIMEOUT_S
         value: "900"
       - key: MNS_BRAINVIS_RETRIES
-        value: "2"
+        value: "4"
       - key: MNS_BRAINVIS_RETRY_BACKOFF_S
-        value: "1.5"
+        value: "5"
+      - key: MNS_BRAINVIS_RETRY_BUDGET_S
+        value: "120"

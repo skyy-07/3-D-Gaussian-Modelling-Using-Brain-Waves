@@ -693,7 +693,8 @@ def _reconstruct_runner(
                     if provider == "fixture"
                     else (
                         f"Lightweight mirror · {len(windows)} independent windows · "
-                        "synthetic static frames…"
+                        "synthetic static frames · waking a sleeping free-tier "
+                        "mirror can take ~60s…"
                     )
                     if provider == "mirror"
                     else (

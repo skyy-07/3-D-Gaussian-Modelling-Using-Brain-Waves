@@ -146,10 +146,11 @@ MNS_RECON_ALLOW_FIXTURE=0   # keep the scripted fixture off in production
 ```
 
 The mirror client calls `/api/pipeline` once per 440 ms EEG window, retries transient
-cold-start responses (408/425/429/500/502/503/504) with bounded exponential backoff,
-and enforces a 24 MB response cap. The public `/api/health/live` probe never waits on
-the mirror, so a sleeping free-tier service cannot fail the container health check.
-`/api/health` still reports the provider readiness used by the UI.
+cold-start responses (408/425/429/500/502/503/504) with bounded exponential backoff
+inside a 120 s budget, and enforces a 24 MB response cap. The public `/api/health/live`
+probe never waits on the mirror, so a sleeping free-tier service cannot fail the
+container health check. `/api/health` still reports the provider readiness used by the
+UI.
 
 To switch back to the real native worker, set `MNS_RECON_PROVIDER=worker`, point
 `MNS_BRAINVIS_WORKER_URL` at the CUDA worker, and set `MNS_ADMIN_TOKEN` if public.
@@ -214,8 +215,9 @@ checkpoint; the fixture provider is not a substitute.
 | `MNS_BRAINVIS_WORKER_URL` | unset | Worker or mirror base URL |
 | `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Per-reconstruction HTTP timeout |
-| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient upstream failures |
-| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base delay for exponential retry backoff |
+| `MNS_BRAINVIS_RETRIES` | `4` | Retries for transient upstream failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `5` | Base delay for exponential retry backoff |
+| `MNS_BRAINVIS_RETRY_BUDGET_S` | `120` | Total time budget for cold-start retries |
 | `MNS_RECON_MAX_FRAMES` | `4` | Maximum static frames per upload |
 | `MNS_RECON_STATUS_TTL_S` | `20` | Health-probe cache |
 | `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror or scripted fixture on a public deployment |

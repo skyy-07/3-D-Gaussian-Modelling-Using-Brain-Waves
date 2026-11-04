@@ -96,7 +96,9 @@ def test_reconstruct_decodes_png_frames_and_metadata():
     assert result.meta["window_s"] == 0.44
 
 
-def test_worker_error_is_surfaced():
+def test_worker_error_is_surfaced(monkeypatch):
+    monkeypatch.setenv("MNS_BRAINVIS_RETRIES", "0")
+
     def handler(_request: httpx.Request) -> httpx.Response:
         return httpx.Response(503, json={"detail": "checkpoint missing"})
 
@@ -316,3 +318,22 @@ def test_mirror_retries_transient_failures(monkeypatch):
     assert calls["n"] == 2
     assert len(result.frames) == 1
     assert result.frames[0].label == "panda"
+
+
+def test_mirror_502_reports_cold_start_without_html(monkeypatch):
+    def handler(_request: httpx.Request) -> httpx.Response:
+        return httpx.Response(502, text="<html><body>502 Bad Gateway</body></html>")
+
+    monkeypatch.setenv("MNS_BRAINVIS_RETRIES", "0")
+    from mns.reconstruct import BrainVisMirrorClient
+
+    client = BrainVisMirrorClient(
+        "http://mirror.local",
+        transport=httpx.MockTransport(handler),
+    )
+    with pytest.raises(ReconstructError, match="waking up or temporarily unavailable"):
+        client.reconstruct(
+            np.zeros((1, 128, 110), dtype=np.float32),
+            250.0,
+            [f"ch{i}" for i in range(128)],
+        )
