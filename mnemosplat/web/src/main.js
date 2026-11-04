@@ -72,6 +72,7 @@ const dom = {
   eegProgressFill: $('#eeg-progress-fill'),
   eegModes: $('#eeg-modes'),
   eegModeHelp: $('#eeg-mode-help'),
+  reconModeBadge: $('#recon-mode-badge'),
   reconModal: $('#recon-modal'),
   reconKicker: $('#recon-kicker'),
   reconTitle: $('#recon-title'),
@@ -669,6 +670,9 @@ function updateEEGModes() {
   const usable = reconUsable();
   const mirror = info?.backend === 'brainvis-mirror';
   const fixture = info?.backend === 'scripted-demo-fixture';
+  if (dom.reconModeBadge) {
+    dom.reconModeBadge.textContent = fixture ? 'FIXTURE' : mirror ? 'MIRROR' : 'GPU';
+  }
   for (const button of dom.eegModes?.querySelectorAll('[data-eeg-mode]') || []) {
     const mode = button.dataset.eegMode;
     button.classList.toggle('is-active', mode === state.eegMode);
