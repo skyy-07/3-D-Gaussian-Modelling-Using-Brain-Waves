@@ -4,12 +4,14 @@
 
 [![Live Demo](https://img.shields.io/badge/Demo-Live%20on%20Render-blue?style=for-the-badge&logo=render)](https://mnemosplat.onrender.com)
 [![BrainVis Mirror](https://img.shields.io/badge/BrainVis%20Endpoint-Active-green?style=for-the-badge)](https://brainvis-api.onrender.com)
+[![Upstream BrainVis](https://img.shields.io/badge/Upstream-RomGai%2FBrainVis-orange?style=for-the-badge&logo=github)](https://github.com/RomGai/BrainVis)
 [![GitHub License](https://img.shields.io/badge/License-MIT-purple?style=for-the-badge)](LICENSE)
 
 * **Live Interactive WebXR App:** <https://mnemosplat.onrender.com>  
 * **BrainVis Neural Decoding API:** <https://brainvis-api.onrender.com>  
 * **Source & Package Docs:** [`mnemosplat/`](mnemosplat/)  
-* **BrainVis Mirror Repository:** [`skyy-07/BrainVis`](https://github.com/skyy-07/BrainVis)
+* **Original BrainVis Repository:** [`RomGai/BrainVis`](https://github.com/RomGai/BrainVis) (ICASSP 2025)  
+* **BrainVis Cloud Mirror / Gateway:** [`skyy-07/BrainVis`](https://github.com/skyy-07/BrainVis)
 
 > [!NOTE]
 > The public demo runs on Render's free tier, which spins down after 15 minutes of inactivity. The initial cold start may take 30–60 seconds while the container initializes.
@@ -60,16 +62,16 @@ Spoken Memory Transcript
 
 ---
 
-## 🔬 The BrainVis Bridge (EEG Decoding & Image Reconstruction)
+## 🔬 The BrainVis Bridge (EEG Decoding & Visual Stimulus Alignment)
 
-MnemoSplat integrates with [BrainVis](https://github.com/skyy-07/BrainVis) (*ICASSP 2025*) to decode visual categories and visual features directly from brain signals:
+MnemoSplat's neural decoding pipeline is built directly upon the official codebase and architecture of **BrainVis** ([`RomGai/BrainVis`](https://github.com/RomGai/BrainVis)):
 
-1. **Strict Input Contract**:
-   * Expects **128 channels** in standard 10–20 montage across **440 time samples** (samples 20–460 @ 250 Hz, capturing 1.76 seconds of stimulus observation).
+1. **Strict Signal Contract**:
+   * Expects **128 channels** in the standard 10–20 montage across **440 time samples** (samples 20–460 @ 250 Hz, capturing 1.76 seconds of stimulus observation).
 2. **Multi-Domain Neural Alignment**:
-   * **Time-Domain Transformer**: 8 layers, 16 attention heads, 1024-d model for temporal wave dynamics.
-   * **Frequency-Domain LSTM**: Fast Fourier Transform (FFT) amplitude spectrum passed through an LSTM across standard clinical bands (Delta, Theta, Alpha, Beta, Gamma).
-   * **AlignNet**: Cross-modal alignment projecting EEG representations into a **`[1, 77, 768]` CLIP text-image latent embedding**.
+   * **Time-Domain Transformer**: An 8-layer, 16-head Transformer extracting temporal waveform dynamics (`d_model=1024`).
+   * **Frequency-Domain LSTM**: Fast Fourier Transform (FFT) amplitude spectrum passed through an LSTM to capture spectral power across clinical bands (Delta, Theta, Alpha, Beta, Gamma).
+   * **AlignNet**: Cross-modal alignment network projecting multi-domain EEG features into a **`[1, 77, 768]` CLIP text-image latent embedding space**.
 3. **Cascaded Diffusion Pipeline (GPU Worker)**:
    * **Stage 1 (PLMS Latent Diffusion)**: Synthesizes a coarse visual stimulus conditioned on the `[77, 768]` EEG-CLIP latent vector.
    * **Stage 2 (SD 1.5 Img2Img)**: Refines the coarse image with high-frequency details (`strength=0.85`) based on decoded visual categories.
@@ -124,6 +126,36 @@ MnemoSplat deploys to Render using the root [`render.yaml`](render.yaml) specifi
 
 * The Docker image builds the Vite frontend and pre-generates demo splat volumes at build time, requiring **zero GPU** and **zero API keys** for runtime browsing.
 * **Cold-Start Resilience**: Built-in exponential backoff (`MNS_BRAINVIS_RETRY_BUDGET_S=120s`, `MNS_BRAINVIS_RETRIES=4`) accommodates sleeping free-tier BrainVis mirror instances seamlessly.
+
+---
+
+## 🙏 Credits & Acknowledgements
+
+This project is made possible thanks to foundational open-source research and tools:
+
+### Primary Attribution: BrainVis (ICASSP 2025)
+Our neural encoding, cross-modal alignment architecture, and EEG preprocessing contracts are built directly upon the official **BrainVis** repository:
+* **Repository:** [https://github.com/RomGai/BrainVis](https://github.com/RomGai/BrainVis)
+* **Paper:** *"BrainVis: Exploring the Bridge between Brain and Visual Signals via Image Reconstruction"*
+* **Authors:** Honghao Fu, Hao Wang, Jing Jih Chin, and Zhiqi Shen (Nanyang Technological University)
+* **Publication:** *ICASSP 2025 - 2025 IEEE International Conference on Acoustics, Speech and Signal Processing*
+* **ArXiv:** [https://arxiv.org/abs/2312.14871](https://arxiv.org/abs/2312.14871)
+
+```bibtex
+@inproceedings{fu2025brainvis,
+  title={BrainVis: Exploring the bridge between brain and visual signals via image reconstruction},
+  author={Fu, Honghao and Wang, Hao and Chin, Jing Jih and Shen, Zhiqi},
+  booktitle={ICASSP 2025-2025 IEEE International Conference on Acoustics, Speech and Signal Processing (ICASSP)},
+  pages={1--5},
+  year={2025},
+  organization={IEEE}
+}
+```
+
+### Additional Acknowledgements
+* **3D Gaussian Splatting & WebXR**: [mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D), [nerfstudio-project/gsplat](https://github.com/nerfstudio-project/gsplat)
+* **Monocular Depth**: [DepthAnything/Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2)
+* **EEG Classification & Vision Decoding Foundations**: [IsaacVanB/visual-reconstruction-eeg](https://github.com/IsaacVanB/visual-reconstruction-eeg), [desa-lab/EEG-Image-Reconstruction](https://github.com/desa-lab/EEG-Image-Reconstruction)
 
 ---
 

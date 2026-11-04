@@ -415,14 +415,17 @@ a minute on the build laptop without a GPU; Muse Image adds a network round trip
 - [Deploy on Render](docs/DEPLOY_RENDER.md) — Docker image, blueprint, public-demo
   guard, verification, cold starts, and troubleshooting.
 
-## Credits
+## Credits & Attribution
 
-Built on ideas and code from
-[RomGai/BrainVis](https://github.com/RomGai/BrainVis),
-[IsaacVanB/visual-reconstruction-eeg](https://github.com/IsaacVanB/visual-reconstruction-eeg),
-[desa-lab/EEG-Image-Reconstruction](https://github.com/desa-lab/EEG-Image-Reconstruction),
-[DepthAnything/Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2),
-[nerfstudio-project/gsplat](https://github.com/nerfstudio-project/gsplat), and
-[mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D).
+MnemoSplat's neural decoding and cross-modal EEG-to-visual representation is built upon the official codebase and architecture of **BrainVis**:
+* **Upstream Repository:** [RomGai/BrainVis](https://github.com/RomGai/BrainVis)
+* **Paper:** *"BrainVis: Exploring the Bridge between Brain and Visual Signals via Image Reconstruction"* (ICASSP 2025)
+* **Authors:** Honghao Fu, Hao Wang, Jing Jih Chin, and Zhiqi Shen (Nanyang Technological University)
+* **ArXiv:** [arXiv:2312.14871](https://arxiv.org/abs/2312.14871)
+
+Additional open-source foundations:
+* [IsaacVanB/visual-reconstruction-eeg](https://github.com/IsaacVanB/visual-reconstruction-eeg) and [desa-lab/EEG-Image-Reconstruction](https://github.com/desa-lab/EEG-Image-Reconstruction)
+* [DepthAnything/Depth-Anything-V2](https://github.com/DepthAnything/Depth-Anything-V2)
+* [nerfstudio-project/gsplat](https://github.com/nerfstudio-project/gsplat) and [mkkellogg/GaussianSplats3D](https://github.com/mkkellogg/GaussianSplats3D)
 
 MIT licensed.
