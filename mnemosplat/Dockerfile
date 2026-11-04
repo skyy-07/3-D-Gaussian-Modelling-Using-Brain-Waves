@@ -21,6 +21,7 @@ COPY web/package.json web/package-lock.json ./
 RUN npm ci --no-audit --no-fund
 COPY web/index.html web/vite.config.js ./
 COPY web/src ./src
+COPY web/public ./public
 RUN npm run build
 
 FROM python:3.11-slim AS runtime
@@ -71,7 +72,7 @@ COPY --from=web --chown=app:app /web/dist ./web/dist
 EXPOSE 8000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
-    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/health', timeout=3)"
+    CMD python -c "import os, urllib.request; urllib.request.urlopen('http://127.0.0.1:' + os.environ.get('PORT', '8000') + '/api/health/live', timeout=3)"
 
 # Render injects PORT. Bind all interfaces so the platform proxy can reach uvicorn.
 CMD ["sh", "-c", "exec mnemosplat serve --host 0.0.0.0 --port ${PORT:-8000}"]

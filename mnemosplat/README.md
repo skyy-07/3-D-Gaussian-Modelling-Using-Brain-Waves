@@ -348,13 +348,23 @@ mnemosplat/
 | `MNS_ALLOW_ORIGINS` | `*` | Comma-separated CORS origins |
 | `MNS_LOG` | `INFO` | Log level |
 | `BRAINVIS_ROOT` | unset | BrainVis checkout for `doctor` |
-| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker, `mirror` for the CPU mirror, `fixture` for the scripted demo |
+| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker, `mirror` for the BrainVis-compatible CPU endpoint, `fixture` for the labelled scripted demo |
 | `MNS_BRAINVIS_WORKER_URL` | unset | External worker or mirror base URL |
 | `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
 | `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror or scripted fixture on a public deployment |
+| `MNS_RECON_ALLOW_FIXTURE` | unset | Required alongside `fixture`; otherwise the factory falls back to the mirror |
 | `MNS_FIXTURE_LABEL` | `running shoe` | Label drawn on scripted fixture frames |
 | `MNS_RECON_MAX_FRAMES` | `4` | Max static frames per reconstruction upload |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Reconstruction request timeout |
+| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient mirror/worker failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base delay for exponential retry backoff |
+
+The production Render blueprint uses `MNS_RECON_PROVIDER=mirror`,
+`MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com`, and
+`MNS_RECON_ALLOW_FIXTURE=0`. The mirror is a lightweight synthetic BrainVis-compatible
+service, not the authors' checkpoint; the UI and API label it accordingly. Use
+`/api/health/live` for Render/Docker probes and `/api/health` for detailed provider
+readiness.
 
 ---
 

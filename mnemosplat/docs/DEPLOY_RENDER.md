@@ -59,11 +59,16 @@ If you prefer the dashboard:
 | Root directory (monorepo) | `mnemosplat` |
 | Dockerfile path | `./Dockerfile` (relative to the root directory) |
 | Docker context | `.` |
-| Health check path | `/api/health` |
+| Health check path | `/api/health/live` |
 | Plan | Free is sufficient for the demo |
 
 There is no build command or start command to enter; Render uses the Dockerfile `CMD`.
 The image listens on `$PORT`, which Render injects.
+
+Use `/api/health/live` for Render and Docker liveness. It returns immediately and does
+not probe the external BrainVis mirror, so a sleeping free-tier mirror cannot fail the
+container health check. `/api/health` remains the detailed readiness/status endpoint
+used by the UI and operators.
 
 ---
 
@@ -85,6 +90,12 @@ The image already sets sensible defaults. The blueprint also sets them explicitl
 | `MNS_EEG_KEEP_JOBS` | `4` | Completed upload directories kept on disk |
 | `MODEL_API_KEY` | unset | Optional Meta Model API key |
 | `MNS_ADMIN_TOKEN` | unset | Optional bearer-like token for write endpoints |
+| `MNS_RECON_PROVIDER` | `mirror` | `mirror` for the BrainVis-compatible CPU endpoint, `worker` for a CUDA worker, `fixture` only for a labelled scripted demo |
+| `MNS_BRAINVIS_WORKER_URL` | `https://brainvis-api.onrender.com` | BrainVis mirror or native worker base URL |
+| `MNS_RECON_PUBLIC` | `1` | Allow the public CPU mirror path |
+| `MNS_RECON_ALLOW_FIXTURE` | `0` | Must be `1` before `MNS_RECON_PROVIDER=fixture` is honored |
+| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient mirror/worker failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base retry delay in seconds |
 
 `PORT` is set by Render; do not override it. `MNS_OUT` and `MNS_WEB_DIST` matter because
 `pip install .` puts `mns` in `site-packages`; the Dockerfile's absolute paths make the
@@ -177,6 +188,7 @@ or build locally with `--build-arg MNS_SPLATS=80000`. The pipeline's hard cap is
 ```bash
 URL=https://YOUR-SERVICE.onrender.com
 
+curl -fsS "$URL/api/health/live" | python -m json.tool
 curl -fsS "$URL/api/health" | python -m json.tool
 curl -fsSI "$URL/" | grep -i -E 'cross-origin|content-type'
 curl -fsS "$URL/assets/index.json" | python -m json.tool | head -40
@@ -186,9 +198,11 @@ curl -sS -o /dev/null -w '%{http_code}\n' \
 
 Expected:
 
+- `/api/health/live` returns `200` with `"ok": true` without waiting on BrainVis.
 - `/api/health` returns `200`, `"ok": true`, `"web_built": true`,
-  `"public_demo": true`, `"generation_enabled": false`, and an `eeg_upload` block
-  with the current upload limits.
+  `"public_demo": true`, `"generation_enabled": false`, an `eeg_upload` block
+  with the current upload limits, and `reconstruction.backend` showing
+  `brainvis-mirror` (not `scripted-demo-fixture`) in production.
 - `/` returns the client HTML with `Cross-Origin-Opener-Policy: same-origin` and
   `Cross-Origin-Embedder-Policy: require-corp`.
 - `/assets/index.json` lists `focus` and `distracted`.
@@ -272,8 +286,10 @@ adb reverse tcp:8000 tcp:8000
 - Render terminates TLS and forwards `PORT`; the Dockerfile binds `0.0.0.0:${PORT}`.
 - **The free plan cannot run BrainVis or Stable Diffusion.** It can proxy to an
   external CUDA host, or to the lightweight CPU mirror. The current live demo sets
-  `MNS_RECON_PROVIDER=mirror`, `MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com`
-  and `MNS_RECON_PUBLIC=1`; that mirror is synthetic and not the authors' checkpoint.
+  `MNS_RECON_PROVIDER=mirror`, `MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com`,
+  `MNS_RECON_PUBLIC=1`, and `MNS_RECON_ALLOW_FIXTURE=0`; that mirror is synthetic and
+  not the authors' checkpoint. If a stale `MNS_RECON_PROVIDER=fixture` is left in the
+  environment, the factory ignores it unless `MNS_RECON_ALLOW_FIXTURE=1` is also set.
   The native worker path still requires `MNS_ADMIN_TOKEN` on a public deployment. See
   [RECONSTRUCTION.md](RECONSTRUCTION.md).
 
@@ -283,8 +299,9 @@ adb reverse tcp:8000 tcp:8000
 
 | Symptom | Check |
 | --- | --- |
-| `502` / health check failing | Deploy log; confirm the process binds `${PORT}`, not a hard-coded port |
-| `/` is 404 but `/api/health` works | `MNS_WEB_DIST` must point at the built client (`/app/web/dist`); rebuild the image |
+| `502` / health check failing | Deploy log; confirm the process binds `${PORT}`, not a hard-coded port, and use `/api/health/live` for the probe |
+| `/` is 404 but `/api/health/live` works | `MNS_WEB_DIST` must point at the built client (`/app/web/dist`); rebuild the image |
+| `/demo/hardcoded_eeg_running_shoe.npy` is 404 | The image must copy `web/public` into the Vite build context; rebuild after the Dockerfile change |
 | `/assets/...` is 404 | `MNS_OUT` must point at `/app/out/demo`; confirm the demo layer ran |
 | `SharedArrayBuffer` unavailable | Response must include COOP/COEP; do not strip them in a proxy or CDN |
 | Build OOM or times out | Lower `MNS_SPLATS`, or move to a larger plan |
@@ -294,7 +311,8 @@ adb reverse tcp:8000 tcp:8000
 | EEG upload returns 429 | The single EEG worker is busy or the per-IP rate limit was reached; retry after the job finishes or the window expires |
 | Uploaded condition disappears | Expected: uploads live under `/app/out/demo/live` and are not persisted across restarts/redeploys |
 | Upload is very slow | Free CPU; lower `MNS_EEG_TARGET_SPLATS`, shorten the recording, or use a larger instance |
-| Reconstruction returns 503 | No GPU worker configured, worker offline, or checkpoint/SD1.5/CUDA missing; read `reconstruction.reason` in `/api/health` |
+| Reconstruction returns 503 | No GPU worker configured, mirror URL missing, or worker offline; read `reconstruction.reason` in `/api/health` |
+| Reconstruction says `scripted-demo-fixture` unexpectedly | `MNS_RECON_PROVIDER=fixture` and `MNS_RECON_ALLOW_FIXTURE=1` are both set; unset the allow flag or switch the provider to `mirror` |
 | Reconstruction returns 403 | Expected on a public demo without `MNS_ADMIN_TOKEN`; the GPU branch is admin-gated |
 | Reconstruction rejects 128 channels | BrainVis needs exactly the 128-channel EEG-Image montage; a 6-channel cap is not silently remapped |
 | Model calls fail | Unrelated to the offline demo; `MODEL_API_KEY` is optional |

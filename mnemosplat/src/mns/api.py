@@ -114,11 +114,13 @@ RECON_PUBLIC = os.environ.get("MNS_RECON_PUBLIC", "").strip().lower() in {
 async def lifespan(_app: FastAPI):
     configure_logging(os.environ.get("MNS_LOG", "INFO"))
     OUT.mkdir(parents=True, exist_ok=True)
+    recon = _reconstruct_client()
     log.info(
-        "assets root: %s | web dist: %s | public demo: %s",
+        "assets root: %s | web dist: %s | public demo: %s | reconstruction provider: %s",
         OUT,
         WEB_DIST,
         PUBLIC_DEMO,
+        getattr(recon, "provider", "worker"),
     )
     yield
 
@@ -799,6 +801,17 @@ def _reconstruct_runner(
         _prune_eeg_jobs()
 
 
+@app.get("/api/health/live")
+def health_live() -> dict:
+    """Fast liveness probe with no dependency checks.
+
+    Render and Docker health checks must not wait on a sleeping external BrainVis
+    mirror. The detailed ``/api/health`` endpoint still reports provider readiness for
+    operators and the UI.
+    """
+    return {"ok": True, "service": "mnemosplat", "version": app.version}
+
+
 @app.get("/api/health")
 def health() -> dict:
     api = MetaModelAPI()
@@ -975,7 +988,9 @@ async def upload_eeg(
     if mode == "reconstruct":
         if not _reconstruct_public_mirror():
             _require_write_access(request)
-        status = _reconstruct_status(force=True)
+        # Use the cached status for the upload gate so a cold mirror does not delay
+        # accepting the job. The runner performs a fresh probe before inference.
+        status = _reconstruct_status()
         if not status.configured:
             raise HTTPException(503, status.reason)
         if not status.ready:

@@ -255,8 +255,64 @@ def test_scripted_fixture_returns_watermarked_frames():
 
 def test_provider_factory_selects_fixture(monkeypatch):
     monkeypatch.setenv("MNS_RECON_PROVIDER", "fixture")
+    monkeypatch.setenv("MNS_RECON_ALLOW_FIXTURE", "1")
     from mns.reconstruct import ScriptedFixtureClient, make_reconstruction_client
 
     client = make_reconstruction_client()
     assert isinstance(client, ScriptedFixtureClient)
     assert client.provider == "fixture"
+
+
+def test_provider_factory_blocks_unopted_fixture(monkeypatch):
+    monkeypatch.setenv("MNS_RECON_PROVIDER", "fixture")
+    monkeypatch.setenv("MNS_RECON_ALLOW_FIXTURE", "0")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "http://mirror.local")
+    from mns.reconstruct import BrainVisMirrorClient, make_reconstruction_client
+
+    client = make_reconstruction_client()
+    assert isinstance(client, BrainVisMirrorClient)
+    assert client.provider == "mirror"
+    assert client.url == "http://mirror.local"
+
+
+def test_mirror_retries_transient_failures(monkeypatch):
+    calls = {"n": 0}
+    png = _png_bytes()
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        if request.url.path == "/api/pipeline":
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return httpx.Response(503, json={"detail": "waking up"})
+            return httpx.Response(
+                200,
+                json={
+                    "analysis": {"predicted_stimulus": {"class_index": 1, "label": "panda"}},
+                    "reconstruction": {
+                        "reconstructed_image_base64": (
+                            "data:image/png;base64,"
+                            + base64.b64encode(png).decode("ascii")
+                        ),
+                        "engine": "built-in-neural-synth",
+                    },
+                },
+            )
+        return httpx.Response(200, json={"status": "healthy"})
+
+    monkeypatch.setenv("MNS_BRAINVIS_RETRIES", "1")
+    monkeypatch.setenv("MNS_BRAINVIS_RETRY_BACKOFF_S", "0")
+
+    from mns.reconstruct import BrainVisMirrorClient
+
+    client = BrainVisMirrorClient(
+        "http://mirror.local",
+        transport=httpx.MockTransport(handler),
+    )
+    result = client.reconstruct(
+        np.zeros((1, 128, 110), dtype=np.float32),
+        250.0,
+        [f"ch{i}" for i in range(128)],
+    )
+    assert calls["n"] == 2
+    assert len(result.frames) == 1
+    assert result.frames[0].label == "panda"

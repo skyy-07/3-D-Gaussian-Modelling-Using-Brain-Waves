@@ -16,7 +16,7 @@ services:
     region: oregon
     dockerfilePath: ./mnemosplat/Dockerfile
     dockerContext: ./mnemosplat
-    healthCheckPath: /api/health
+    healthCheckPath: /api/health/live
     autoDeployTrigger: commit
 
     envVars:
@@ -51,8 +51,11 @@ services:
       - key: MNS_RECON_PROVIDER
         value: mirror
         # For a labelled scripted running-shoe demo with no checkpoint, change the
-        # value above to "fixture". It returns fixed illustration frames, not EEG
-        # reconstruction; the UI and API mark the job as scripted_demo_fixture.
+        # value above to "fixture" and set MNS_RECON_ALLOW_FIXTURE=1. The fixture
+        # returns fixed illustration frames, not EEG reconstruction; the UI and API
+        # mark the job as scripted_demo_fixture.
+      - key: MNS_RECON_ALLOW_FIXTURE
+        value: "0"
       - key: MNS_RECON_PUBLIC
         value: "1"
       - key: MNS_BRAINVIS_WORKER_TOKEN
@@ -61,3 +64,7 @@ services:
         value: "4"
       - key: MNS_BRAINVIS_TIMEOUT_S
         value: "900"
+      - key: MNS_BRAINVIS_RETRIES
+        value: "2"
+      - key: MNS_BRAINVIS_RETRY_BACKOFF_S
+        value: "1.5"

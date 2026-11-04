@@ -142,7 +142,14 @@ Use it with:
 MNS_RECON_PROVIDER=mirror
 MNS_BRAINVIS_WORKER_URL=https://brainvis-api.onrender.com
 MNS_RECON_PUBLIC=1          # opt in to public CPU-mirror use
+MNS_RECON_ALLOW_FIXTURE=0   # keep the scripted fixture off in production
 ```
+
+The mirror client calls `/api/pipeline` once per 440 ms EEG window, retries transient
+cold-start responses (408/425/429/500/502/503/504) with bounded exponential backoff,
+and enforces a 24 MB response cap. The public `/api/health/live` probe never waits on
+the mirror, so a sleeping free-tier service cannot fail the container health check.
+`/api/health` still reports the provider readiness used by the UI.
 
 To switch back to the real native worker, set `MNS_RECON_PROVIDER=worker`, point
 `MNS_BRAINVIS_WORKER_URL` at the CUDA worker, and set `MNS_ADMIN_TOKEN` if public.
@@ -158,8 +165,15 @@ fixture** provider:
 
 ```bash
 MNS_RECON_PROVIDER=fixture
+MNS_RECON_ALLOW_FIXTURE=1
 MNS_RECON_PUBLIC=1
 ```
+
+The fixture is deliberately opt-in twice. If `MNS_RECON_PROVIDER=fixture` is left in a
+production environment without `MNS_RECON_ALLOW_FIXTURE=1`, the factory logs a warning
+and falls back to the configured BrainVis mirror instead of silently serving scripted
+illustrations. This prevents a leftover demo flag from replacing the real endpoint after
+a redeploy.
 
 It accepts the normal 128-channel upload contract but **never inspects the EEG**. It
 returns a fixed four-frame running-shoe flipbook with a visible watermark:
@@ -200,9 +214,12 @@ checkpoint; the fixture provider is not a substitute.
 | `MNS_BRAINVIS_WORKER_URL` | unset | Worker or mirror base URL |
 | `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Per-reconstruction HTTP timeout |
+| `MNS_BRAINVIS_RETRIES` | `2` | Retries for transient upstream failures |
+| `MNS_BRAINVIS_RETRY_BACKOFF_S` | `1.5` | Base delay for exponential retry backoff |
 | `MNS_RECON_MAX_FRAMES` | `4` | Maximum static frames per upload |
 | `MNS_RECON_STATUS_TTL_S` | `20` | Health-probe cache |
 | `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror or scripted fixture on a public deployment |
+| `MNS_RECON_ALLOW_FIXTURE` | unset | Required alongside `fixture`; without it the app falls back to the mirror |
 | `MNS_FIXTURE_LABEL` | `running shoe` | Label drawn on scripted fixture frames |
 | `MNS_ADMIN_TOKEN` | unset | Required for the native worker on a public demo |
 

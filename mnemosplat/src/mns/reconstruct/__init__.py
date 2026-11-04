@@ -13,7 +13,9 @@ from __future__ import annotations
 import base64
 import io
 import json
+import logging
 import os
+import time
 from dataclasses import dataclass, field
 from typing import Any
 
@@ -24,9 +26,16 @@ from scipy import signal as scipy_signal
 
 from .fixture import SCRIPTED_BACKEND, ScriptedFixtureClient
 
+log = logging.getLogger(__name__)
+
 DEFAULT_TIMEOUT_S = 900.0
-DEFAULT_PROBE_TIMEOUT_S = 4.0
+DEFAULT_PROBE_TIMEOUT_S = 2.0
+DEFAULT_RETRIES = 2
+DEFAULT_RETRY_BACKOFF_S = 1.5
+MAX_RESPONSE_BYTES = 24 * 1024 * 1024
+TRANSIENT_STATUS = {408, 425, 429, 500, 502, 503, 504}
 MIRROR_BACKEND = "brainvis-mirror"
+_FIXTURE_GUARD_WARNED = False
 
 
 class ReconstructError(RuntimeError):
@@ -79,6 +88,86 @@ def _env_float(name: str, default: float) -> float:
         return default
 
 
+def _env_int(name: str, default: int) -> int:
+    try:
+        return int(os.environ.get(name, default))
+    except (TypeError, ValueError):
+        return default
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.environ.get(name)
+    if value is None:
+        return default
+    return value.strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _retry_delay(attempt: int, response: httpx.Response | None = None) -> float:
+    if response is not None:
+        retry_after = response.headers.get("retry-after")
+        if retry_after:
+            try:
+                return max(0.0, float(retry_after))
+            except ValueError:
+                pass
+    backoff = max(0.0, _env_float("MNS_BRAINVIS_RETRY_BACKOFF_S", DEFAULT_RETRY_BACKOFF_S))
+    return backoff * (2**attempt)
+
+
+def _post_with_retries(
+    client: httpx.Client,
+    url: str,
+    **kwargs: Any,
+) -> httpx.Response:
+    """POST with bounded retries for cold starts and transient upstream failures.
+
+    BrainVis mirror instances are often free-tier services that return 502/503 while
+    waking up. Retrying those responses is safe because the pipeline request is
+    stateless. Non-transient 4xx responses are returned immediately for the caller to
+    surface as a configuration or input error.
+    """
+    attempts = max(0, _env_int("MNS_BRAINVIS_RETRIES", DEFAULT_RETRIES)) + 1
+    for attempt in range(attempts):
+        try:
+            response = client.post(url, **kwargs)
+        except (httpx.TimeoutException, httpx.TransportError) as exc:
+            if attempt >= attempts - 1:
+                raise
+            delay = _retry_delay(attempt)
+            log.warning(
+                "BrainVis request to %s failed (%s); retrying in %.1fs (%d/%d)",
+                url,
+                exc,
+                delay,
+                attempt + 1,
+                attempts - 1,
+            )
+            time.sleep(delay)
+            continue
+
+        if response.status_code in TRANSIENT_STATUS and attempt < attempts - 1:
+            delay = _retry_delay(attempt, response)
+            log.warning(
+                "BrainVis endpoint returned HTTP %s; retrying in %.1fs (%d/%d)",
+                response.status_code,
+                delay,
+                attempt + 1,
+                attempts - 1,
+            )
+            time.sleep(delay)
+            continue
+        return response
+    raise AssertionError("retry loop exhausted without a response")
+
+
+def _check_response_size(response: httpx.Response, source: str) -> None:
+    length = len(response.content)
+    if length > MAX_RESPONSE_BYTES:
+        raise ReconstructError(
+            f"{source} returned {length} bytes; the limit is {MAX_RESPONSE_BYTES} bytes"
+        )
+
+
 class BrainVisClient:
     """HTTP client for the separate CUDA worker.
 
@@ -123,7 +212,7 @@ class BrainVisClient:
     def _client(self, timeout_s: float) -> httpx.Client:
         return httpx.Client(
             headers=self._headers(),
-            timeout=httpx.Timeout(timeout_s, connect=5.0),
+            timeout=httpx.Timeout(timeout_s, connect=min(5.0, timeout_s)),
             transport=self._transport,
         )
 
@@ -207,7 +296,8 @@ class BrainVisClient:
 
         try:
             with self._client(self.timeout_s) as client:
-                response = client.post(
+                response = _post_with_retries(
+                    client,
                     f"{self.url}/reconstruct",
                     files={"file": ("eeg.npy", buf.getvalue(), "application/octet-stream")},
                     data=data,
@@ -226,6 +316,7 @@ class BrainVisClient:
                 f"BrainVis worker returned HTTP {response.status_code}: {detail}"
             )
 
+        _check_response_size(response, "BrainVis worker")
         try:
             body = response.json()
         except Exception as exc:  # noqa: BLE001
@@ -324,7 +415,7 @@ class BrainVisMirrorClient:
     def _client(self, timeout_s: float) -> httpx.Client:
         return httpx.Client(
             headers=self._headers(),
-            timeout=httpx.Timeout(timeout_s, connect=5.0),
+            timeout=httpx.Timeout(timeout_s, connect=min(5.0, timeout_s)),
             transport=self._transport,
         )
 
@@ -416,7 +507,15 @@ class BrainVisMirrorClient:
                     prepared = np.asarray(window, dtype=np.float32)
                     if prepared.shape[-1] != 440:
                         prepared = scipy_signal.resample(prepared, 440, axis=-1)
-                    response = client.post(
+                    log.debug(
+                        "BrainVis mirror pipeline request %d/%d (%d channels, %d samples)",
+                        index + 1,
+                        len(arr),
+                        prepared.shape[0],
+                        prepared.shape[1],
+                    )
+                    response = _post_with_retries(
+                        client,
                         f"{self.url}/api/pipeline",
                         json={
                             "eeg_data": prepared.tolist(),
@@ -434,6 +533,7 @@ class BrainVisMirrorClient:
                         raise ReconstructError(
                             f"BrainVis mirror returned HTTP {response.status_code}: {detail}"
                         )
+                    _check_response_size(response, "BrainVis mirror")
                     body = response.json()
                     reconstruction = body.get("reconstruction") or {}
                     analysis = body.get("analysis") or {}
@@ -493,7 +593,19 @@ def make_reconstruction_client() -> (
     """
     provider = os.environ.get("MNS_RECON_PROVIDER", "worker").strip().lower()
     if provider in {"fixture", "scripted", "scripted-demo", "scripted_demo", "demo-fixture"}:
-        return ScriptedFixtureClient.from_env()
+        if _env_bool("MNS_RECON_ALLOW_FIXTURE", False):
+            return ScriptedFixtureClient.from_env()
+        # Production safety: a leftover fixture flag must not silently replace the
+        # configured BrainVis endpoint with a scripted illustration. The fixture is
+        # opt-in only, and a public deployment should use the real mirror/worker.
+        global _FIXTURE_GUARD_WARNED
+        if not _FIXTURE_GUARD_WARNED:
+            log.warning(
+                "MNS_RECON_PROVIDER=fixture is ignored because "
+                "MNS_RECON_ALLOW_FIXTURE is not enabled; using the BrainVis mirror."
+            )
+            _FIXTURE_GUARD_WARNED = True
+        return BrainVisMirrorClient.from_env()
     if provider in {"mirror", "brainvis-mirror", "brainvis_mirror", "api", "brainvis-api"}:
         return BrainVisMirrorClient.from_env()
     return BrainVisClient.from_env()

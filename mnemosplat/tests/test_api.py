@@ -81,6 +81,18 @@ def test_health_reports_deployment_state():
     assert body["models"]["text"]
 
 
+def test_live_health_skips_external_probes(monkeypatch):
+    def boom(*_args, **_kwargs):
+        raise AssertionError("liveness must not probe the reconstruction provider")
+
+    monkeypatch.setattr(api, "_reconstruct_status", boom)
+    with TestClient(api.app) as client:
+        response = client.get("/api/health/live")
+    assert response.status_code == 200
+    assert response.json()["ok"] is True
+    assert response.json()["service"] == "mnemosplat"
+
+
 def test_isolation_headers_are_present():
     with TestClient(api.app) as client:
         response = client.get("/api/health")
