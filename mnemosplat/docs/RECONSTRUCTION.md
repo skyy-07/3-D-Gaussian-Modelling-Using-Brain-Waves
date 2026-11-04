@@ -147,19 +147,61 @@ MNS_RECON_PUBLIC=1          # opt in to public CPU-mirror use
 To switch back to the real native worker, set `MNS_RECON_PROVIDER=worker`, point
 `MNS_BRAINVIS_WORKER_URL` at the CUDA worker, and set `MNS_ADMIN_TOKEN` if public.
 
-## 7. Configuration
+## 7. Scripted demo fixture (not reconstruction)
+
+A hardcoded EEG cannot force a semantic label through the mirror. Its classifier is
+randomly initialized, its weights change when Render restarts, and its image engine is
+a procedural canvas. The same EEG can produce different labels on different days.
+
+For a reliable recorded demo, the repository includes an explicit **scripted demo
+fixture** provider:
+
+```bash
+MNS_RECON_PROVIDER=fixture
+MNS_RECON_PUBLIC=1
+```
+
+It accepts the normal 128-channel upload contract but **never inspects the EEG**. It
+returns a fixed four-frame running-shoe flipbook with a visible watermark:
+
+- `SCRIPTED DEMO FIXTURE`
+- `NOT EEG RECONSTRUCTION`
+- `FIXED ILLUSTRATION · NOT A DECODED MEMORY`
+
+The API marks the job as `kind: scripted_demo_fixture`; the UI changes the modal
+heading and note so the frames cannot be mistaken for checkpoint output. This provider
+exists only to make the upload → job → gallery path repeatable for a video. Do not
+present it as BrainVis, as a memory, or as evidence of what a subject saw.
+
+The deterministic EEG fixture used for the demo is generated with:
+
+```bash
+python tools/make_demo_eeg.py out/demo/hardcoded_eeg_running_shoe.npy
+```
+
+It produces `out/demo/hardcoded_eeg_running_shoe.npy`:
+
+- `128 × 1760` float32, 250 Hz, 7.04 s;
+- up to sixteen 0.44 s windows (the UI uses four by default);
+- upload with `sfreq=250`, `mode=reconstruct`.
+
+If you need a real reconstruction, use the native worker with the authors'
+checkpoint; the fixture provider is not a substitute.
+
+## 8. Configuration
 
 ### CPU app (Render/local)
 
 | Variable | Default | Purpose |
 | --- | --- | --- |
-| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker; `mirror` for the CPU mirror |
+| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker; `mirror` for the CPU mirror; `fixture` for the scripted demo |
 | `MNS_BRAINVIS_WORKER_URL` | unset | Worker or mirror base URL |
 | `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Per-reconstruction HTTP timeout |
 | `MNS_RECON_MAX_FRAMES` | `4` | Maximum static frames per upload |
 | `MNS_RECON_STATUS_TTL_S` | `20` | Health-probe cache |
-| `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror on a public deployment |
+| `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror or scripted fixture on a public deployment |
+| `MNS_FIXTURE_LABEL` | `running shoe` | Label drawn on scripted fixture frames |
 | `MNS_ADMIN_TOKEN` | unset | Required for the native worker on a public demo |
 
 ### GPU worker
@@ -175,7 +217,7 @@ The worker expects:
 | `MNS_BRAINVIS_WORKER_TOKEN` | Must match the CPU app token |
 | `MNS_BRAINVIS_DEVICE` | `cuda` (default) |
 
-## 8. Enabling the native checkpoint path
+## 9. Enabling the native checkpoint path
 
 1. Obtain the BrainVis checkpoint from the authors.
 2. Put the BrainVis checkout, checkpoint and SD1.5 checkpoint on a CUDA machine.
@@ -191,7 +233,7 @@ refuses the request. There is intentionally no random-weight or "make something 
 fallback in the native worker. The mirror is a separate, explicitly labelled demo
 provider.
 
-## 9. What would make this closer to video
+## 10. What would make this closer to video
 
 BrainVis alone is not enough. A real video path would need:
 

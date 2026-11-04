@@ -50,6 +50,9 @@ services:
         value: https://brainvis-api.onrender.com
       - key: MNS_RECON_PROVIDER
         value: mirror
+        # For a labelled scripted running-shoe demo with no checkpoint, change the
+        # value above to "fixture". It returns fixed illustration frames, not EEG
+        # reconstruction; the UI and API mark the job as scripted_demo_fixture.
       - key: MNS_RECON_PUBLIC
         value: "1"
       - key: MNS_BRAINVIS_WORKER_TOKEN

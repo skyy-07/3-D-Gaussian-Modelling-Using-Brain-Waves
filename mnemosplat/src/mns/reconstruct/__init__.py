@@ -22,6 +22,8 @@ import numpy as np
 from PIL import Image
 from scipy import signal as scipy_signal
 
+from .fixture import SCRIPTED_BACKEND, ScriptedFixtureClient
+
 DEFAULT_TIMEOUT_S = 900.0
 DEFAULT_PROBE_TIMEOUT_S = 4.0
 MIRROR_BACKEND = "brainvis-mirror"
@@ -479,13 +481,19 @@ class BrainVisMirrorClient:
         )
 
 
-def make_reconstruction_client() -> BrainVisClient | BrainVisMirrorClient:
+def make_reconstruction_client() -> (
+    BrainVisClient | BrainVisMirrorClient | ScriptedFixtureClient
+):
     """Build the provider selected by ``MNS_RECON_PROVIDER``.
 
     ``worker`` is the native CUDA worker with the authors' checkpoint.
     ``mirror`` is the lightweight CPU Render mirror, for demo/transport only.
+    ``fixture`` is a deterministic scripted illustration, explicitly *not*
+    reconstruction; use it only for a labelled demo when no checkpoint is available.
     """
     provider = os.environ.get("MNS_RECON_PROVIDER", "worker").strip().lower()
+    if provider in {"fixture", "scripted", "scripted-demo", "scripted_demo", "demo-fixture"}:
+        return ScriptedFixtureClient.from_env()
     if provider in {"mirror", "brainvis-mirror", "brainvis_mirror", "api", "brainvis-api"}:
         return BrainVisMirrorClient.from_env()
     return BrainVisClient.from_env()
@@ -498,6 +506,8 @@ __all__ = [
     "ReconFrame",
     "ReconResult",
     "ReconstructError",
+    "SCRIPTED_BACKEND",
+    "ScriptedFixtureClient",
     "WorkerStatus",
     "make_reconstruction_client",
 ]

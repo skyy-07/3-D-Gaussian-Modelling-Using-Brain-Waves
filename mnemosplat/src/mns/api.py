@@ -235,24 +235,25 @@ def _reconstruct_enabled() -> bool:
     client = _reconstruct_client()
     if not client.configured:
         return False
-    # The lightweight mirror is CPU-only and free to run, so an operator can opt in
-    # to a public demo with MNS_RECON_PUBLIC=1. The native CUDA worker stays
-    # admin-gated on public deployments.
-    if getattr(client, "provider", "worker") == "mirror" and RECON_PUBLIC:
+    # The lightweight mirror and the scripted fixture are CPU-only and free to run,
+    # so an operator can opt in to a public demo with MNS_RECON_PUBLIC=1. The native
+    # CUDA worker stays admin-gated on public deployments.
+    if getattr(client, "provider", "worker") in {"mirror", "fixture"} and RECON_PUBLIC:
         return True
     return (not PUBLIC_DEMO) or bool(ADMIN_TOKEN)
 
 
 def _reconstruct_public_mirror() -> bool:
-    """Whether this request may use the free mirror without an admin token.
+    """Whether this request may use a free synthetic provider without an admin token.
 
-    The mirror is a synthetic CPU service, so it is safe to expose publicly when the
-    operator opts in. The native CUDA worker remains behind the normal write gate.
-    If an admin token is configured, it is still required for the mirror too.
+    The mirror and the scripted fixture are CPU-only, synthetic demo providers, so
+    they are safe to expose publicly when the operator opts in. The native CUDA worker
+    remains behind the normal write gate. If an admin token is configured, it is still
+    required for either synthetic provider too.
     """
     client = _reconstruct_client()
     return (
-        getattr(client, "provider", "worker") == "mirror"
+        getattr(client, "provider", "worker") in {"mirror", "fixture"}
         and RECON_PUBLIC
         and not ADMIN_TOKEN
     )
@@ -677,16 +678,22 @@ def _reconstruct_runner(
         if not status.ready:
             raise RuntimeError(status.reason)
         client = _reconstruct_client()
+        provider = getattr(client, "provider", "worker")
         windows = _brainvis_windows(recording, n_frames)
         with _eeg_lock:
             job.update(
                 progress=0.25,
                 message=(
                     (
+                        f"Scripted demo fixture · {len(windows)} fixed illustration "
+                        "frames · not reconstruction…"
+                    )
+                    if provider == "fixture"
+                    else (
                         f"Lightweight mirror · {len(windows)} independent windows · "
                         "synthetic static frames…"
                     )
-                    if getattr(client, "provider", "worker") == "mirror"
+                    if provider == "mirror"
                     else (
                         f"BrainVis · {len(windows)} independent windows · "
                         "cascade diffusion (this can take minutes)…"
@@ -727,7 +734,9 @@ def _reconstruct_runner(
                 result.meta.get("provider")
                 or getattr(client, "provider", "worker")
             ),
-            "kind": "experimental_static_reconstruction",
+            "kind": str(
+                result.meta.get("kind") or "experimental_static_reconstruction"
+            ),
             "window_s": RECON_WINDOW_S,
             "provider_window_s": result.meta.get("window_s"),
             "frames": len(images),
@@ -754,8 +763,13 @@ def _reconstruct_runner(
                 stage="done",
                 progress=1.0,
                 message=(
-                    "Experimental reconstruction ready. These are independent static "
-                    "frames, not a decoded video."
+                    "Scripted demo fixture ready. These are fixed illustration frames, "
+                    "not EEG reconstruction."
+                    if provider == "fixture"
+                    else (
+                        "Experimental reconstruction ready. These are independent static "
+                        "frames, not a decoded video."
+                    )
                 ),
                 images=images,
                 meta=meta,
@@ -797,15 +811,20 @@ def health() -> dict:
             "window_s": RECON_WINDOW_S,
             "channels_required": RECON_CHANNELS,
             "note": (
-                "Lightweight BrainVis-compatible mirror: synthetic class/image "
-                "generation, not the authors' checkpoint. Frames are independent, "
-                "not video."
-                if recon.backend == "brainvis-mirror"
+                "Scripted demo fixture: fixed illustration frames, not EEG "
+                "reconstruction. The provider never decodes the uploaded signal."
+                if recon.backend == "scripted-demo-fixture"
                 else (
-                    "Experimental BrainVis static-image branch. The CPU web service "
-                    "only proxies to an external CUDA worker; it cannot run Stable "
-                    "Diffusion on the Render free plan. Frames are independent, not "
-                    "video."
+                    "Lightweight BrainVis-compatible mirror: synthetic class/image "
+                    "generation, not the authors' checkpoint. Frames are independent, "
+                    "not video."
+                    if recon.backend == "brainvis-mirror"
+                    else (
+                        "Experimental BrainVis static-image branch. The CPU web service "
+                        "only proxies to an external CUDA worker; it cannot run Stable "
+                        "Diffusion on the Render free plan. Frames are independent, not "
+                        "video."
+                    )
                 )
             ),
         }

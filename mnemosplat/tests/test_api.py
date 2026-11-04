@@ -407,3 +407,35 @@ def test_public_mirror_opt_in(monkeypatch):
     monkeypatch.setattr(api, "ADMIN_TOKEN", "")
     monkeypatch.setattr(api, "RECON_PUBLIC", True)
     assert api._reconstruct_enabled() is True
+
+
+def test_public_scripted_fixture_reconstruction_is_allowed(eeg_env, monkeypatch):
+    from mns.reconstruct import ScriptedFixtureClient
+
+    fixture = ScriptedFixtureClient()
+    monkeypatch.setattr(api, "_reconstruct_client", lambda: fixture)
+    monkeypatch.setattr(api, "_reconstruct_status", lambda force=False: fixture.status())
+    monkeypatch.setattr(api, "PUBLIC_DEMO", True)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setattr(api, "RECON_PUBLIC", True)
+    with TestClient(api.app) as client:
+        health = client.get("/api/health").json()["reconstruction"]
+        assert health["backend"] == "scripted-demo-fixture"
+        assert "not EEG reconstruction" in health["note"]
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("fixture.npy", _npy(), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250"},
+        )
+        assert response.status_code == 202, response.text
+        payload = response.json()
+        job = client.get(f"/api/eeg/jobs/{payload['job']}").json()
+    assert job["state"] == "done", job
+    assert job["meta"]["provider"] == "scripted-demo-fixture"
+    assert job["meta"]["kind"] == "scripted_demo_fixture"
+    assert "not EEG reconstruction" in job["meta"]["note"]
+    assert len(job["images"]) >= 1
+    path = eeg_env / job["images"][0]["url"]
+    assert path.exists()
+    with Image.open(path) as image:
+        assert image.size == (512, 512)

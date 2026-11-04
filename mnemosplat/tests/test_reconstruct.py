@@ -225,3 +225,38 @@ def test_provider_factory_selects_mirror(monkeypatch):
     client = make_reconstruction_client()
     assert client.provider == "mirror"
     assert client.url == "http://mirror.local"
+
+
+def test_scripted_fixture_returns_watermarked_frames():
+    from mns.reconstruct import ScriptedFixtureClient
+
+    client = ScriptedFixtureClient()
+    status = client.status()
+    assert status.configured is True
+    assert status.ready is True
+    assert status.backend == "scripted-demo-fixture"
+    assert status.checkpoint is False
+
+    result = client.reconstruct(
+        np.zeros((2, 128, 110), dtype=np.float32),
+        250.0,
+        [f"ch{i}" for i in range(128)],
+    )
+    assert len(result.frames) == 2
+    assert result.frames[0].label == "running shoe"
+    assert result.frames[0].predicted_class == 13
+    assert result.meta["kind"] == "scripted_demo_fixture"
+    assert result.meta["scripted"] is True
+    assert "not EEG reconstruction" in result.meta["note"]
+    with Image.open(io.BytesIO(result.frames[0].png)) as image:
+        assert image.size == (512, 512)
+        assert image.format == "PNG"
+
+
+def test_provider_factory_selects_fixture(monkeypatch):
+    monkeypatch.setenv("MNS_RECON_PROVIDER", "fixture")
+    from mns.reconstruct import ScriptedFixtureClient, make_reconstruction_client
+
+    client = make_reconstruction_client()
+    assert isinstance(client, ScriptedFixtureClient)
+    assert client.provider == "fixture"

@@ -73,6 +73,9 @@ const dom = {
   eegModes: $('#eeg-modes'),
   eegModeHelp: $('#eeg-mode-help'),
   reconModal: $('#recon-modal'),
+  reconKicker: $('#recon-kicker'),
+  reconTitle: $('#recon-title'),
+  reconBlurb: $('#recon-blurb'),
   reconGrid: $('#recon-grid'),
   reconMeta: $('#recon-meta'),
   reconNote: $('#recon-note'),
@@ -665,14 +668,17 @@ function updateEEGModes() {
   const info = reconInfo();
   const usable = reconUsable();
   const mirror = info?.backend === 'brainvis-mirror';
+  const fixture = info?.backend === 'scripted-demo-fixture';
   for (const button of dom.eegModes?.querySelectorAll('[data-eeg-mode]') || []) {
     const mode = button.dataset.eegMode;
     button.classList.toggle('is-active', mode === state.eegMode);
     if (mode === 'reconstruct') {
       button.title = usable
-        ? (mirror
-          ? 'Lightweight BrainVis-compatible mirror (synthetic frames, not the authors’ checkpoint)'
-          : 'Experimental BrainVis static-frame reconstruction on an external GPU')
+        ? (fixture
+          ? 'Scripted demo fixture (fixed illustration frames, not EEG reconstruction)'
+          : mirror
+            ? 'Lightweight BrainVis-compatible mirror (synthetic frames, not the authors’ checkpoint)'
+            : 'Experimental BrainVis static-frame reconstruction on an external GPU')
         : (info?.reason || 'Reconstruction is not configured');
     }
   }
@@ -689,6 +695,8 @@ function updateEEGModes() {
     } else if (!info?.ready) {
       message = `Reconstruction endpoint is not ready: ${info?.reason || 'checkpoint or CUDA missing'}`;
       warn = true;
+    } else if (fixture) {
+      message = 'Ready. Scripted demo fixture: fixed illustration frames, not EEG reconstruction. The provider never decodes the uploaded signal.';
     } else if (mirror) {
       message = 'Ready. Lightweight BrainVis-compatible mirror: synthetic class/image generation, not the authors’ checkpoint. Frames are independent, not video.';
     } else {
@@ -708,12 +716,16 @@ function setEEGMode(mode) {
   state.eegMode = mode;
   updateEEGModes();
   if (state.eegMode === 'reconstruct') {
-    const mirror = reconInfo()?.backend === 'brainvis-mirror';
+    const backend = reconInfo()?.backend;
+    const mirror = backend === 'brainvis-mirror';
+    const fixture = backend === 'scripted-demo-fixture';
     setEEGStatus(
       reconUsable()
-        ? (mirror
-          ? 'Ready. Upload 128 channels; the mirror returns synthetic static frames.'
-          : 'Ready. Upload 128 channels; the GPU worker will generate static frames.')
+        ? (fixture
+          ? 'Ready. Upload 128 channels; the scripted demo fixture returns fixed illustration frames, not reconstruction.'
+          : mirror
+            ? 'Ready. Upload 128 channels; the mirror returns synthetic static frames.'
+            : 'Ready. Upload 128 channels; the GPU worker will generate static frames.')
         : 'Reconstruction is unavailable. See the status above.',
       reconUsable() ? 'is-ok' : 'is-error',
     );
@@ -814,10 +826,17 @@ function setEEGFile(file) {
   setEEGProgress(0);
   if (state.eegMode === 'reconstruct') {
     const info = reconInfo();
-    const mirror = info?.backend === 'brainvis-mirror';
+    const backend = info?.backend;
+    const mirror = backend === 'brainvis-mirror';
+    const fixture = backend === 'scripted-demo-fixture';
+    const detail = fixture
+      ? 'the scripted demo fixture returns fixed illustration frames, not reconstruction'
+      : mirror
+        ? 'the mirror returns synthetic static frames'
+        : 'frames are independent, not video';
     setEEGStatus(
       reconUsable()
-        ? `Ready. ${info?.channels_required || 128} channels required; ${mirror ? 'the mirror returns synthetic static frames' : 'frames are independent, not video'}.`
+        ? `Ready. ${info?.channels_required || 128} channels required; ${detail}.`
         : 'Reconstruction is unavailable. Switch to condition mode or configure the endpoint.',
       reconUsable() ? 'is-ok' : 'is-error',
     );
@@ -922,6 +941,7 @@ function completeReconstruction(job) {
   }).join('');
 
   const meta = job.meta || {};
+  const fixture = meta.provider === 'scripted-demo-fixture' || meta.kind === 'scripted_demo_fixture';
   const mirror = meta.provider === 'brainvis-mirror' || meta.engine?.includes('neural-synth');
   dom.reconMeta.textContent = [
     `${images.length} static frames`,
@@ -930,17 +950,33 @@ function completeReconstruction(job) {
     job.filename ? String(job.filename) : '',
     job.elapsed_s ? `${Number(job.elapsed_s).toFixed(1)}s` : '',
   ].filter(Boolean).join(' · ');
+  dom.reconKicker.textContent = fixture
+    ? 'Scripted demo fixture · not reconstruction'
+    : 'Experimental reconstruction · external provider';
+  dom.reconTitle.textContent = fixture
+    ? 'Hardcoded running-object illustration.'
+    : 'Static frames, not a decoded video.';
+  dom.reconBlurb.innerHTML = fixture
+    ? 'This is a fixed, scripted demo asset returned for the bundled 128-channel EEG fixture. It is <strong>not</strong> EEG reconstruction, not a decoded memory, and not evidence of what anyone saw. The provider never inspects the uploaded signal.'
+    : 'These images were generated by the configured reconstruction provider from independent EEG windows. They are not temporally consistent, not a video, and not a memory. A lightweight mirror produces synthetic class/image output; it is not the authors’ trained BrainVis checkpoint. Treat every frame as an experiment, never as evidence of what a person saw.';
   dom.reconNote.textContent = meta.note || (
-    mirror
-      ? 'Lightweight mirror output: synthetic class/image generation, not the authors’ checkpoint.'
-      : 'Experimental static frames from the configured provider; not a video and not a memory.'
+    fixture
+      ? 'Scripted demo fixture: fixed illustration frames, not EEG reconstruction.'
+      : mirror
+        ? 'Lightweight mirror output: synthetic class/image generation, not the authors’ checkpoint.'
+        : 'Experimental static frames from the configured provider; not a video and not a memory.'
   );
 
   dom.reconModal.hidden = false;
   state.uploading = false;
   resetEEGForm();
   dom.eegModal.hidden = true;
-  toast(`Experimental reconstruction ready · ${images.length} static frames`, 7000);
+  toast(
+    fixture
+      ? `Scripted demo fixture ready · ${images.length} fixed illustration frames`
+      : `Experimental reconstruction ready · ${images.length} static frames`,
+    7000,
+  );
 }
 
 async function completeEEGUpload(job) {
@@ -990,7 +1026,9 @@ async function submitEEG() {
     return;
   }
 
-  const mirror = reconInfo()?.backend === 'brainvis-mirror';
+  const backend = reconInfo()?.backend;
+  const mirror = backend === 'brainvis-mirror';
+  const fixture = backend === 'scripted-demo-fixture';
   state.uploading = true;
   updateEEGSubmit();
   dom.eegSubmit.textContent = 'Uploading…';
@@ -1011,9 +1049,11 @@ async function submitEEG() {
     setEEGProgress(25);
     setEEGStatus(
       mode === 'reconstruct'
-        ? (mirror
-          ? 'Queued. The lightweight mirror is analyzing each EEG window…'
-          : 'Queued. The external GPU worker is loading the BrainVis cascade…')
+        ? (fixture
+          ? 'Queued. The scripted demo fixture is preparing fixed illustration frames…'
+          : mirror
+            ? 'Queued. The lightweight mirror is analyzing each EEG window…'
+            : 'Queued. The external GPU worker is loading the BrainVis cascade…')
         : 'Queued. Analysing posterior EEG bands…',
       'is-busy',
     );

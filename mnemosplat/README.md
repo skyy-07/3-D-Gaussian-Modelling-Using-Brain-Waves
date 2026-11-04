@@ -39,7 +39,7 @@ posterior EEG ──► Welch PSD ──► salience + attention field M(u,v) �
 | Meta Model API (Muse Spark / Muse Image / SAM 3.1 / Muse Voice) | Implemented, **not executed here** — no `MODEL_API_KEY` |
 | Depth-Anything-V2 on CPU/GPU | Optional; `torch`/`transformers` not installed in this venv |
 | BrainVis learned salience encoder | Interface + artifact check shipped; checkpoints are request-only |
-| Experimental reconstruction | Native GPU branch + lightweight CPU mirror; live demo uses the mirror, explicitly labelled synthetic. Not video. |
+| Experimental reconstruction | Native GPU branch + lightweight CPU mirror + opt-in scripted fixture; all synthetic providers are explicitly labelled. Not video. |
 | EEG | **Synthetic** comparison pair; public **recorded CSV/NPY upload** is labelled `recorded EEG` |
 | Clinical / PTSD claims | Not made. This is a systems prototype, not a diagnostic |
 
@@ -348,10 +348,11 @@ mnemosplat/
 | `MNS_ALLOW_ORIGINS` | `*` | Comma-separated CORS origins |
 | `MNS_LOG` | `INFO` | Log level |
 | `BRAINVIS_ROOT` | unset | BrainVis checkout for `doctor` |
-| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker, `mirror` for the CPU mirror |
+| `MNS_RECON_PROVIDER` | `worker` | `worker` for the native CUDA worker, `mirror` for the CPU mirror, `fixture` for the scripted demo |
 | `MNS_BRAINVIS_WORKER_URL` | unset | External worker or mirror base URL |
 | `MNS_BRAINVIS_WORKER_TOKEN` | unset | Bearer token shared with the native worker |
-| `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror on a public deployment |
+| `MNS_RECON_PUBLIC` | unset | Allow the CPU mirror or scripted fixture on a public deployment |
+| `MNS_FIXTURE_LABEL` | `running shoe` | Label drawn on scripted fixture frames |
 | `MNS_RECON_MAX_FRAMES` | `4` | Max static frames per reconstruction upload |
 | `MNS_BRAINVIS_TIMEOUT_S` | `900` | Reconstruction request timeout |
 
