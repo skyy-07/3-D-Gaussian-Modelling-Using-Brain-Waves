@@ -74,8 +74,8 @@ browser ──POST /api/eeg?mode=reconstruct──► CPU FastAPI app (Render)
 ```
 
 The CPU app never imports `torch` and never calls Stable Diffusion. It validates the
-upload, enforces the admin gate and rate limits, forwards the windows, and stores the
-returned PNGs.
+upload, applies the appropriate admin or public-mirror gate, enforces rate limits,
+forwards the windows, and stores the returned PNGs.
 
 ## 5. Requirements and limits
 

@@ -257,7 +257,9 @@ class _FakeReconstructClient:
         raise AssertionError("this fake is replaced by the test")
 
 
-def test_public_demo_blocks_reconstruction_before_upload(eeg_env):
+def test_public_demo_blocks_native_worker_before_upload(eeg_env, monkeypatch):
+    monkeypatch.setenv("MNS_RECON_PROVIDER", "worker")
+    monkeypatch.setenv("MNS_BRAINVIS_WORKER_URL", "http://gpu.local")
     with TestClient(api.app) as client:
         response = client.post(
             "/api/eeg",
@@ -266,6 +268,55 @@ def test_public_demo_blocks_reconstruction_before_upload(eeg_env):
         )
     assert response.status_code == 403
     assert "disabled" in response.json()["detail"]
+
+
+def test_public_mirror_reconstruction_is_allowed(eeg_env, monkeypatch):
+    import io
+
+    from PIL import Image
+
+    out = io.BytesIO()
+    Image.new("RGB", (8, 8), (200, 140, 60)).save(out, format="PNG")
+    png = out.getvalue()
+
+    class _Mirror:
+        configured = True
+        provider = "mirror"
+
+        def reconstruct(self, signal, sfreq, channels, *, seed=None):
+            return ReconResult(
+                frames=[ReconFrame(index=0, png=png, label="mirror-test")],
+                meta={"provider": "brainvis-mirror", "engine": "test-mirror"},
+            )
+
+    monkeypatch.setattr(api, "_reconstruct_client", lambda: _Mirror())
+    monkeypatch.setattr(
+        api,
+        "_reconstruct_status",
+        lambda force=False: WorkerStatus(
+            configured=True,
+            ready=True,
+            reason="mirror ready",
+            backend="brainvis-mirror",
+        ),
+    )
+    monkeypatch.setattr(api, "PUBLIC_DEMO", True)
+    monkeypatch.setattr(api, "ADMIN_TOKEN", "")
+    monkeypatch.setattr(api, "RECON_PUBLIC", True)
+    with TestClient(api.app) as client:
+        response = client.post(
+            "/api/eeg",
+            files={"file": ("memory.npy", _npy(), "application/octet-stream")},
+            data={"mode": "reconstruct", "sfreq": "250"},
+        )
+        assert response.status_code == 202, response.text
+        payload = response.json()
+        job = client.get(f"/api/eeg/jobs/{payload['job']}").json()
+    assert job["state"] == "done", job
+    assert job["meta"]["provider"] == "brainvis-mirror"
+    assert job["meta"]["engine"] == "test-mirror"
+    assert len(job["images"]) == 1
+    assert (eeg_env / job["images"][0]["url"]).exists()
 
 
 def test_reconstruction_without_a_worker_returns_503(eeg_env, monkeypatch):

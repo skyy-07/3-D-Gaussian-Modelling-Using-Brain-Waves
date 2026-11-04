@@ -243,6 +243,21 @@ def _reconstruct_enabled() -> bool:
     return (not PUBLIC_DEMO) or bool(ADMIN_TOKEN)
 
 
+def _reconstruct_public_mirror() -> bool:
+    """Whether this request may use the free mirror without an admin token.
+
+    The mirror is a synthetic CPU service, so it is safe to expose publicly when the
+    operator opts in. The native CUDA worker remains behind the normal write gate.
+    If an admin token is configured, it is still required for the mirror too.
+    """
+    client = _reconstruct_client()
+    return (
+        getattr(client, "provider", "worker") == "mirror"
+        and RECON_PUBLIC
+        and not ADMIN_TOKEN
+    )
+
+
 def _reconstruct_status(force: bool = False) -> WorkerStatus:
     """Probe the reconstruction provider, with a short cache for /api/health."""
     client = _reconstruct_client()
@@ -930,15 +945,17 @@ async def upload_eeg(
     ``mode=condition`` is the public, CPU-only salience path: the baked keyframe and
     depth map are reused and only density changes. ``mode=reconstruct`` is a separate
     experimental path that forwards 128-channel EEG windows to an external BrainVis
-    CUDA worker and returns static frames. It is disabled on a public deployment
-    unless an admin token is configured, and it never runs diffusion in this process.
+    provider and returns static frames. The native CUDA worker is admin-gated on a
+    public deployment; the free CPU mirror can be exposed with
+    ``MNS_RECON_PUBLIC=1``. This process never runs diffusion locally.
     """
     mode = (mode or "condition").strip().lower()
     if mode not in {"condition", "reconstruct"}:
         raise HTTPException(400, "mode must be `condition` or `reconstruct`")
 
     if mode == "reconstruct":
-        _require_write_access(request)
+        if not _reconstruct_public_mirror():
+            _require_write_access(request)
         status = _reconstruct_status(force=True)
         if not status.configured:
             raise HTTPException(503, status.reason)
